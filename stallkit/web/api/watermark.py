@@ -229,7 +229,8 @@ def _base_image(ws: Workspace, target: str, design: str, max_edge: int) -> Any:
     base = mockups_api.display_image(path, max_edge)
     out = mockups_api._cache_dir() / f"watermark-{threading.get_ident()}.jpg"
     try:
-        mockup.compose(art, base, out, area=area, min_edge=0)
+        mockup.compose(art, base, out, area=area, min_edge=0,
+                       kind=catalog.kind_of(catalog.load(ws), target))
         with Image.open(out) as opened:
             opened.load()
             return opened.copy()

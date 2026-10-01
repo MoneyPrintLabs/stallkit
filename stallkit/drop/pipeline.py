@@ -650,21 +650,18 @@ def run(
     for note in info_notes:
         say(note)
 
-    positions = mockup.load_positions(workspace.positions_path)
     # One calibration covers every mockup of the same size — that is the point of
     # storing fractions. A mockup with no entry of its own borrows the area of a
-    # calibrated one with identical dimensions before falling back to the default.
-    sizes = mockup.mockup_sizes(available)
-    by_size: dict[tuple[int, int], mockup.PrintArea] = {}
-    for name in sorted(positions):
-        if name in sizes:
-            by_size.setdefault(sizes[name], positions[name])
+    # calibrated one with identical dimensions before falling back to the default:
+    # catalog.effective_areas, the rule the app's runs and the Mockuplar page use too.
+    areas = catalog.effective_areas(workspace)
+    try:
+        mockup_facts = catalog.load(workspace)
+    except (OSError, ValueError):
+        mockup_facts = {}
 
     def area_for(template_image: Path) -> mockup.PrintArea:
-        own = positions.get(template_image.name)
-        if own is not None:
-            return own
-        return by_size.get(sizes.get(template_image.name, (0, 0)), mockup.DEFAULT_PRINT_AREA)
+        return areas.get(template_image.name, (mockup.DEFAULT_PRINT_AREA, ""))[0]
 
     # The folder name is a useful fallback for `2-PRODUCTS/mountain sunset/IMG_01.png`,
     # but never for a file sitting directly in 2-PRODUCTS — that would turn the
@@ -800,9 +797,10 @@ def run(
                 area = area_for(template_image)
                 out = report.out_dir / _output_name(row.source, template_image, taken)
                 try:
-                    row.images.append(
-                        mockup.compose(row.source, template_image, out, area=area)
-                    )
+                    row.images.append(mockup.compose(
+                        row.source, template_image, out, area=area,
+                        kind=catalog.kind_of(mockup_facts, template_image.name),
+                    ))
                 except Exception as exc:  # noqa: BLE001 — one bad file must not stop a batch
                     row.warnings.append(f"mockup {template_image.name} failed: {exc}")
             if include_flat:

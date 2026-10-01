@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import io
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - a source build without lcms2
 
 from ..client import UPLOADABLE_SUFFIXES
 from ..errors import ValidationError
+from . import surface
 
 # A chest print on a folded garment shot, as fractions of the mockup. Deliberately
 # conservative: too small reads as a design choice, too large reads as a bug.
@@ -62,16 +63,51 @@ QUARTER_TURNED = frozenset({5, 6, 7, 8})
 WHITE = (255, 255, 255)
 
 
+# How much of the mockup's own light, folds and texture a design takes (0-100), by mockup
+# type when the print area does not say: fabric takes most, paper and rigid prints little.
+# Without a type (a direct compose() call) it is 0, the flat paste of old.
+REALISM_DEFAULTS = {
+    "tshirt": 65, "sweatshirt": 65, "hoodie": 65, "tote": 60, "pillow": 50, "mug": 45,
+    "canvas": 30, "phone_case": 25, "sticker": 15, "poster": 15, "other": 35,
+}
+# How far the design wraps round a cylinder (0-100), by type: mugs only.
+CURVE_DEFAULTS = {"mug": 55}
+# The types the editor offers the curve for: a mug, or a tumbler or bottle filed as "other".
+CURVE_TYPES = frozenset({"mug", "other"})
+# Rigid surfaces have no folds, so the design is never displaced along them.
+RIGID_TYPES = frozenset({"mug", "poster", "canvas", "phone_case", "sticker"})
+
+
 @dataclass(frozen=True)
 class PrintArea:
-    """Where the design goes, as fractions of the mockup's width and height."""
+    """Where the design goes, as fractions of the mockup's width and height.
+
+    `quad`, when set, is four corners (top-left, top-right, bottom-right, bottom-left)
+    the design is mapped into with perspective; x/y/w/h are then their bounding box,
+    so code that only knows rectangles still sees where the print is. `realism` and
+    `curve` (0-100) are the area's own settings; None means "the mockup type's default"
+    (REALISM_DEFAULTS, CURVE_DEFAULTS), which `styled()` fills in.
+    """
 
     x: float
     y: float
     w: float
     h: float
+    quad: tuple[tuple[float, float], ...] | None = None
+    realism: int | None = None
+    curve: int | None = None
 
     def __post_init__(self) -> None:
+        if self.quad is not None:
+            corners = _corners(self.quad)
+            object.__setattr__(self, "quad", corners)
+            xs = [x for x, _ in corners]
+            ys = [y for _, y in corners]
+            # The box rounded like the editor rounds fractions, so JSON stays readable.
+            object.__setattr__(self, "x", round(min(xs), 6))
+            object.__setattr__(self, "y", round(min(ys), 6))
+            object.__setattr__(self, "w", round(max(xs) - min(xs), 6))
+            object.__setattr__(self, "h", round(max(ys) - min(ys), 6))
         for name, value in (("x", self.x), ("y", self.y), ("w", self.w), ("h", self.h)):
             if not 0.0 <= value <= 1.0:
                 raise ValidationError(f"print area {name}={value} must be between 0 and 1")
@@ -79,6 +115,20 @@ class PrintArea:
             raise ValidationError("print area extends past the edge of the mockup")
         if self.w <= 0 or self.h <= 0:
             raise ValidationError("print area has no size")
+        for name in ("realism", "curve"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+                raise ValidationError(f"print area {name} must be a number from 0 to 100")
+            if not 0 <= value <= 100:
+                raise ValidationError(f"print area {name}={value} must be between 0 and 100")
+            object.__setattr__(self, name, int(round(value)))
+
+    @classmethod
+    def from_quad(cls, corners: Any, *, realism: int | None = None,
+                  curve: int | None = None) -> PrintArea:
+        return cls(0.0, 0.0, 0.0, 0.0, quad=corners, realism=realism, curve=curve)
 
     def pixels(self, width: int, height: int) -> tuple[int, int, int, int]:
         return (
@@ -88,8 +138,66 @@ class PrintArea:
             max(1, round(self.h * height)),
         )
 
-    def to_dict(self) -> dict[str, float]:
-        return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+    def corners(self, width: int, height: int) -> list[tuple[float, float]]:
+        """The four corners in pixels of a `width` x `height` image (TL, TR, BR, BL).
+
+        A rectangle's corners are its `pixels()` box, so it lands where it always did.
+        """
+        if self.quad is None:
+            x, y, w, h = self.pixels(width, height)
+            return surface.rect_corners(x, y, w, h)
+        return [(qx * width, qy * height) for qx, qy in self.quad]
+
+    def geometry(self) -> PrintArea:
+        """The same area without its own realism and curve (the type defaults apply)."""
+        return PrintArea(self.x, self.y, self.w, self.h, quad=self.quad)
+
+    def to_dict(self) -> dict[str, Any]:
+        """x/y/w/h, plus quad/realism/curve only when set: an area saved before they
+        existed is written back exactly as it was."""
+        out: dict[str, Any] = {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
+        if self.quad is not None:
+            out["quad"] = [[x, y] for x, y in self.quad]
+        if self.realism is not None:
+            out["realism"] = self.realism
+        if self.curve is not None:
+            out["curve"] = self.curve
+        return out
+
+
+def _corners(raw: Any) -> tuple[tuple[float, float], ...]:
+    """Four (x, y) fractions in order TL, TR, BR, BL that make a convex shape."""
+    try:
+        if any(len(point) != 2 for point in raw):
+            raise ValueError("a corner is not [x, y]")
+        points = [(float(point[0]), float(point[1])) for point in raw]
+    except (TypeError, ValueError, IndexError, KeyError) as exc:
+        raise ValidationError("print area quad must be four [x, y] corners") from exc
+    if len(points) != 4:
+        raise ValidationError("print area quad must be four [x, y] corners")
+    clean = []
+    for x, y in points:
+        if x != x or y != y or not (-0.0001 <= x <= 1.0001 and -0.0001 <= y <= 1.0001):
+            raise ValidationError("print area corners must be between 0 and 1")
+        clean.append((min(1.0, max(0.0, x)), min(1.0, max(0.0, y))))
+    if not surface.is_well_shaped(clean):
+        raise ValidationError(
+            "print area corners must go top-left, top-right, bottom-right, bottom-left "
+            "and make a shape without a dent, a twist or a corner flattened into a side"
+        )
+    return tuple(clean)
+
+
+def styled(area: PrintArea, kind: str | None) -> PrintArea:
+    """`area` with its realism and curve filled in: its own, else the `kind` (mockup
+    type) default, else 0 when there is no type."""
+    realism = area.realism
+    if realism is None:
+        realism = REALISM_DEFAULTS.get(kind, 0) if kind else 0
+    curve = area.curve
+    if curve is None:
+        curve = CURVE_DEFAULTS.get(kind, 0) if kind else 0
+    return replace(area, realism=realism, curve=curve)
 
 
 DEFAULT_PRINT_AREA = PrintArea(*DEFAULT_AREA)
@@ -134,12 +242,28 @@ def load_positions(path: Path) -> dict[str, PrintArea]:
         if not isinstance(value, dict):
             continue
         try:
-            out[name] = PrintArea(
-                float(value["x"]), float(value["y"]), float(value["w"]), float(value["h"])
-            )
+            box = (float(value["x"]), float(value["y"]), float(value["w"]), float(value["h"]))
+            realism, curve = _level(value.get("realism")), _level(value.get("curve"))
+            try:
+                out[name] = PrintArea(*box, quad=value.get("quad"), realism=realism, curve=curve)
+            except ValidationError:
+                if value.get("quad") is None:
+                    raise
+                # Corners a hand edit (or a later, stricter rule) broke: the rectangle
+                # they were saved with still says where the print goes.
+                out[name] = PrintArea(*box, realism=realism, curve=curve)
         except (KeyError, TypeError, ValueError) as exc:
             raise ValidationError(f"{path}: entry {name!r} is malformed ({exc})") from exc
     return out
+
+
+def _level(value: Any) -> int | None:
+    """A stored 0-100 setting: None when absent, clamped when a hand edit overshot."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        raise ValueError(f"{value!r} is not a number from 0 to 100")
+    return int(round(min(100.0, max(0.0, float(value)))))
 
 
 def save_positions(path: Path, positions: dict[str, PrintArea]) -> None:
@@ -376,6 +500,7 @@ def compose(
     area: PrintArea | None = None,
     min_edge: int = OUTPUT_MIN_EDGE,
     background: tuple[int, int, int] = WHITE,
+    kind: str | None = None,
 ) -> Path:
     """Place one design inside one mockup's print area and write a JPEG.
 
@@ -384,6 +509,10 @@ def compose(
     template with a transparent ground — which is most cut-out shirt and mug shots —
     is flattened onto `background` first, because a JPEG cannot carry the alpha and
     dropping it would leave the product sitting on black.
+
+    `kind` is the mockup's type (catalog): it decides the realism and curve an area
+    without its own uses (`styled`) and whether the design follows folds. Without it,
+    and with neither set on the area, this is the flat paste it always was.
     """
     area = area or DEFAULT_PRINT_AREA
     try:
@@ -412,17 +541,44 @@ def compose(
             (round(mockup.width * factor), round(mockup.height * factor)), Image.LANCZOS
         )
 
-    box_x, box_y, box_w, box_h = area.pixels(*mockup.size)
+    place(mockup, design, area, kind=kind)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    mockup.save(out_path, "JPEG", **JPEG_OPTIONS)
+    return out_path
+
+
+def place(canvas: Image.Image, design: Image.Image, area: PrintArea, *,
+          kind: str | None = None) -> None:
+    """Draw `design` (RGBA) into `area` on `canvas` (RGB, changed in place).
+
+    The one compositing step every render goes through (compose(), so the app's runs,
+    the CLI and the editor's preview). A rectangle with no curve and nothing to follow
+    is the flat paste of old, pixel for pixel, with the shading on top when it has
+    realism; four corners, a curve or folds go through `surface.render`.
+    """
+    area = styled(area, kind)
+    realism, curve = area.realism or 0, area.curve or 0
+    displace = realism > 0 and kind not in RIGID_TYPES
+    if area.quad is not None or curve > 0 or displace:
+        surface.render(canvas, design, area.corners(*canvas.size),
+                       realism=realism, curve=curve, displace=displace)
+        return
+
+    box_x, box_y, box_w, box_h = area.pixels(*canvas.size)
     scale = min(box_w / design.width, box_h / design.height)
     new_size = (max(1, round(design.width * scale)), max(1, round(design.height * scale)))
     design = design.resize(new_size, Image.LANCZOS)
 
     offset = (box_x + (box_w - new_size[0]) // 2, box_y + (box_h - new_size[1]) // 2)
-    mockup.paste(design, offset, design)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    mockup.save(out_path, "JPEG", **JPEG_OPTIONS)
-    return out_path
+    if realism > 0:
+        ref = surface.reference(canvas.crop((box_x, box_y, box_x + box_w, box_y + box_h)),
+                                surface.rect_corners(0, 0, box_w, box_h))
+        if ref is not None:
+            under = canvas.crop((offset[0], offset[1], offset[0] + new_size[0],
+                                 offset[1] + new_size[1]))
+            design = surface.shade(design, under, ref, realism, min(box_w, box_h))
+    canvas.paste(design, offset, design)
 
 
 def draw_preview(
@@ -459,9 +615,17 @@ def draw_preview(
     overlay = Image.new("RGBA", preview.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     edge = max(2, round(min(preview.size) / 250))
-    draw.rectangle(box, fill=(255, 64, 64, 56))
-    draw.rectangle(box, outline=(0, 0, 0, 220), width=edge * 3)
-    draw.rectangle(box, outline=(255, 64, 64, 255), width=edge)
+    if area.quad is not None:
+        # Four corners: the shape itself, outlined the same two ways.
+        points = area.corners(*preview.size)
+        ring = [*points, points[0]]
+        draw.polygon(points, fill=(255, 64, 64, 56))
+        draw.line(ring, fill=(0, 0, 0, 220), width=edge * 3, joint="curve")
+        draw.line(ring, fill=(255, 64, 64, 255), width=edge, joint="curve")
+    else:
+        draw.rectangle(box, fill=(255, 64, 64, 56))
+        draw.rectangle(box, outline=(0, 0, 0, 220), width=edge * 3)
+        draw.rectangle(box, outline=(255, 64, 64, 255), width=edge)
     preview = Image.alpha_composite(preview, overlay).convert("RGB")
 
     if max_edge and max(preview.size) > max_edge:

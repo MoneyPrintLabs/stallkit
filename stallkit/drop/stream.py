@@ -907,15 +907,16 @@ class _Run:
                 self._check_halt()
                 area = self.areas.get(template_image.name, (mockup.DEFAULT_PRINT_AREA, ""))[0]
                 out = self.out_dir / self._output_name(item.source, template_image)
+                facts = self.mockup_facts.get(template_image.name)
+                kind, colour = ((facts.type, facts.color) if facts is not None
+                                else catalog.guess(template_image.name))
                 try:
-                    images.append(mockup.compose(design, template_image, out, area=area))
+                    images.append(mockup.compose(design, template_image, out, area=area,
+                                                 kind=kind))
                 except Exception as exc:  # noqa: BLE001 — one mockup must not stop the product
                     self._warn(item, "mockup_failed", f"mockup {template_image.name} failed: {exc}",
                                "mockup", mockup=template_image.name)
                     continue
-                facts = self.mockup_facts.get(template_image.name)
-                kind, colour = ((facts.type, facts.color) if facts is not None
-                                else catalog.guess(template_image.name))
                 alts[images[-1]] = alt_text(concept, kind, colour)
                 self._enlarged(item, design, self.mockup_sizes.get(template_image.name), area)
                 self._step(item, "mockup", RUNNING, images=[self._rel(p) for p in images],

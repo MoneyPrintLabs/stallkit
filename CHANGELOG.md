@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Realistic mockups.** A design no longer sits flat on top of the photo:
+  - *Gerçekçilik* (realism, 0-100): the design takes the mockup's own light, folds and
+    fabric texture inside the print area. Darker folds darken the print, highlights lift
+    it, and a flat area changes nothing, so a design keeps its colours on a white or light
+    garment. On fabric it also follows the folds a little. Each mockup type has its own
+    default: 65 for T-shirts, sweatshirts and hoodies, 60 for totes, 50 for pillows, 45 for
+    mugs, 30 for canvas, 25 for phone cases, 15 for posters and stickers, 35 for other.
+    0 is the flat paste of before.
+  - *4 köşe* (four corners): a print area can be four draggable corners instead of a
+    rectangle, and the design is placed in perspective (a framed print shot at an
+    angle, a tilted phone case). Each corner can also be moved with the arrow keys.
+  - *Kavis* (curve, 0-100): the design wraps round a mug, tumbler or bottle, narrower and
+    a little darker towards the sides, with a slight arc. On by default (55) for mugs and
+    offered for the *other* type too.
+  The print-area editor in **Mockuplar** has the shape switch and both sliders, with a
+  live preview drawn by the same code as the drafts. *Aynı ölçüdeki mockup'lara da
+  uygula* copies the corners and the settings as well; a same-size mockup that only
+  borrows the area keeps its own type's realism and curve. Tasarım Yükle, `drop run`,
+  `drop auto` and the watermark preview all composite this way, and the watermark still
+  goes on afterwards. Existing print areas keep working; with realism and curve at 0
+  they render exactly as before. Corners, realism and curve are stored in
+  `positions.json` next to `x`, `y`, `w`, `h`, which still hold the area's bounding box.
+  A 2000 px composite takes about 0.2-0.4 s.
+
 ## [0.3.2] — 2026-09-30
 
 ### Added

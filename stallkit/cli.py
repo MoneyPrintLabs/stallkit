@@ -1637,12 +1637,19 @@ def drop_calibrate(
             )
             raise typer.Exit(1)
         # Writes positions.json itself unless this is a dry run.
+        # --area moves the print; corners aside, each mockup keeps its realism and curve.
         names = catalog_mod.save_area(
-            ws, selected[0].name, new_area, same_size=same_size, dry_run=dry_run, sizes=sizes
+            ws, selected[0].name, new_area, same_size=same_size, dry_run=dry_run, sizes=sizes,
+            keep_style=True,
         )
         targets = [p for p in mockups if p.name in names]
         for target in targets:
-            positions[target.name] = new_area
+            old = positions.get(target.name)
+            positions[target.name] = (
+                mockup_mod.PrintArea(new_area.x, new_area.y, new_area.w, new_area.h,
+                                     realism=old.realism, curve=old.curve)
+                if old is not None else new_area
+            )
         changed = targets
         selected = targets
 
@@ -1751,7 +1758,8 @@ def _print_print_areas(
         table.add_row(
             path.name,
             f"{size[0]}x{size[1]}" if size else "unreadable",
-            ",".join(format(value, "g") for value in (area.x, area.y, area.w, area.h)),
+            ",".join(format(value, "g") for value in (area.x, area.y, area.w, area.h))
+            + (" (4 corners)" if area.quad is not None else ""),
             source,
         )
     console.print(table)

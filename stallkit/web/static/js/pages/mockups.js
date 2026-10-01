@@ -2,8 +2,9 @@
 //
 //   /kurulum/mockuplar         grid of mockup cards, type filter chips, upload by picker or drop,
 //                              and under it the Filigran card (#filigran): the seller's watermark
-//   /kurulum/mockuplar/:name   editor: library list, canvas with the print-area rectangle,
-//                              X / Y / width / height fields, same-size apply, preview design
+//   /kurulum/mockuplar/:name   editor: library list, canvas with the print-area rectangle (or
+//                              four corners for perspective), X / Y / width / height fields,
+//                              realism and curve sliders, same-size apply, preview design
 //
 // Everything is local (1-MOCKUPS in the products folder); no Etsy call is made, so the
 // page works before any key is saved. Endpoints: stallkit/web/api/mockups.py and
@@ -31,6 +32,7 @@ import {
   skeleton,
   spinner,
   svg,
+  tabs,
   textInput,
   toggle,
   uid,
@@ -47,6 +49,8 @@ const SHOW_KEY = "stallkit.mockups.show-design";
 const ZOOMS = [1, 1.5, 2, 3, 4];
 const IMAGE_MAX = 1400;
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+// The four-corner area's corners, in the order the server stores them.
+const CORNERS = ["tl", "tr", "br", "bl"];
 const SAMPLE = { id: "sample", version: "1" };
 const GRID_PATH = "/kurulum/mockuplar";
 // The "Baskı alanı" pill shows once the rectangle is this big on screen (CSS px): the
@@ -141,6 +145,100 @@ function sameArea(a, b) {
 function roundArea(a) {
   const r = (v) => Math.round(v * 100000) / 100000;
   return { x: r(a.x), y: r(a.y), w: r(a.w), h: r(a.h) };
+}
+
+/** Four [x, y] fractions -> the same, rounded like roundArea (null stays null). */
+function roundQuad(q) {
+  const r = (v) => Math.round(v * 100000) / 100000;
+  return q ? q.map(([x, y]) => [r(x), r(y)]) : null;
+}
+
+function sameQuad(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.every((p, i) => Math.abs(p[0] - b[i][0]) < 1e-5 && Math.abs(p[1] - b[i][1]) < 1e-5);
+}
+
+/** The rectangle {x, y, w, h} -> its corners, top-left first, clockwise. */
+function rectQuad(a) {
+  return [
+    [a.x, a.y],
+    [a.x + a.w, a.y],
+    [a.x + a.w, a.y + a.h],
+    [a.x, a.y + a.h],
+  ];
+}
+
+/** Four corners -> their bounding box {x, y, w, h}. */
+function quadBox(q) {
+  const xs = q.map((p) => p[0]);
+  const ys = q.map((p) => p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/** Whether the corners (in pixels) turn clockwise at every corner: no dent, no twist. */
+function isConvex(q) {
+  for (let i = 0; i < 4; i++) {
+    const [x0, y0] = q[i];
+    const [x1, y1] = q[(i + 1) % 4];
+    const [x2, y2] = q[(i + 2) % 4];
+    if ((x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1) <= 1e-9) return false;
+  }
+  return true;
+}
+
+function triangle(p, q, r) {
+  return Math.abs((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])) / 2;
+}
+
+/** Convex, in order, and no corner flattened into a side (its triangle with its two
+ *  neighbours at least 8% of the shape): the server's surface.is_well_shaped. */
+function wellShaped(q) {
+  if (!isConvex(q)) return false;
+  const whole = triangle(q[0], q[1], q[2]) + triangle(q[0], q[2], q[3]);
+  if (whole <= 0) return false;
+  for (let i = 0; i < 4; i++) if (triangle(q[(i + 3) % 4], q[i], q[(i + 1) % 4]) < 0.08 * whole) return false;
+  return true;
+}
+
+function insideQuad(q, x, y) {
+  for (let i = 0; i < 4; i++) {
+    const [x0, y0] = q[i];
+    const [x1, y1] = q[(i + 1) % 4];
+    if ((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) < 0) return false;
+  }
+  return true;
+}
+
+/** The 3x3 homography (row-major, last 1) taking four src points to four dst points. */
+function homography(src, dst) {
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i];
+    const [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y, u]);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y, v]);
+  }
+  for (let c = 0; c < 8; c++) {
+    let pivot = c;
+    for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[pivot][c])) pivot = r;
+    if (Math.abs(A[pivot][c]) < 1e-12) return null;
+    [A[c], A[pivot]] = [A[pivot], A[c]];
+    const lead = A[c][c];
+    for (let k = c; k < 9; k++) A[c][k] /= lead;
+    for (let r = 0; r < 8; r++) {
+      if (r === c || !A[r][c]) continue;
+      const f = A[r][c];
+      for (let k = c; k < 9; k++) A[r][k] -= f * A[c][k];
+    }
+  }
+  return [...A.map((row) => row[8]), 1];
+}
+
+function applyH(M, x, y) {
+  const w = M[6] * x + M[7] * y + M[8];
+  return [(M[0] * x + M[1] * y + M[2]) / w, (M[3] * x + M[4] * y + M[5]) / w];
 }
 
 /** "%34,0" (tr) / "34.0%" (en) for a fraction. */
@@ -1869,6 +1967,16 @@ async function mountEditor(el, ctx, name) {
   let design = readStored("local", DESIGN_KEY, null);
   let designs = null;
   let drag = null;
+  // Four corners (fractions, TL TR BR BL) when the area is a "4 köşe" one, else null;
+  // `area` is then their bounding box. `look` is the realism and curve on screen;
+  // `explicit` says which of them the seller set (the others follow the mockup type).
+  let quad = null;
+  let savedQuad = null;
+  let look = { realism: 0, curve: 0 };
+  let savedLook = { realism: 0, curve: 0 };
+  let explicit = { realism: false, curve: false };
+  let savedExplicit = { realism: false, curve: false };
+  let style = { realism_default: 0, curve_default: 0, curve_offered: false };
   let previewSeq = 0;
   let saving = false;
   let chain = Promise.resolve();
@@ -1878,7 +1986,8 @@ async function mountEditor(el, ctx, name) {
   // Declared before anything can call markStale(), which cancels it.
   const schedulePreview = debounce(() => loadPreview(), 350);
 
-  const isDirty = () => !!(saved && area && !sameArea(saved, area));
+  const isDirty = () =>
+    !!(saved && area && (!sameArea(saved, area) || !sameQuad(savedQuad, quad) || look.realism !== savedLook.realism || look.curve !== savedLook.curve));
   const W = () => (item && item.width) || 1;
   const H = () => (item && item.height) || 1;
 
@@ -1920,7 +2029,18 @@ async function mountEditor(el, ctx, name) {
     sizeChip,
     HANDLES.map((hd) => h("span", { class: `mk-handle h-${hd}`, dataset: { handle: hd }, "aria-hidden": "true" })),
   );
-  const art = h("div", { class: "mk-art" }, baseImg, previewImg, rect);
+  // The four-corner area: a shape, the design mapped into it in perspective while it is
+  // dragged (the server's preview replaces it after), and one handle per corner.
+  const quadHint = h("span", { class: "sr-only", id: uid("mk-quad-hint") }, t("editor.quad_hint"));
+  const quadPoly = svg("polygon", { class: "mk-quad-shape" });
+  const quadSvg = svg("svg", { class: "mk-quad-svg", viewBox: "0 0 100 100", preserveAspectRatio: "none", "aria-hidden": "true" }, quadPoly);
+  const quadDesign = h("img", { class: "mk-quad-design", alt: "", draggable: "false" });
+  quadDesign.addEventListener("load", () => placeQuadDesign());
+  const quadHandles = CORNERS.map((c, i) =>
+    h("span", { class: `mk-qhandle q-${c}`, tabindex: "0", role: "button", dataset: { corner: String(i) }, title: t(`editor.corner_${c}`), "aria-describedby": quadHint.id }),
+  );
+  const quadLayer = h("div", { class: "mk-quad" }, quadDesign, quadSvg, quadHandles);
+  const art = h("div", { class: "mk-art" }, baseImg, previewImg, rect, quadLayer);
   const stageSpinner = h("div", { class: "mk-stage-wait" }, spinner({ size: 22, tone: "accent" }));
   const stage = h("div", { class: "mk-stage" }, art);
   const zoomVal = h("span", { class: "num" }, percent(1, 0));
@@ -1932,7 +2052,7 @@ async function mountEditor(el, ctx, name) {
   );
   // The pill at the bottom of the stage: "draw the print area", then "print area set".
   const underHost = h("div", { class: "mk-under", role: "status" });
-  const stageWrap = h("div", { class: "mk-stage-wrap" }, stage, stageSpinner, zoomBtn, underHost);
+  const stageWrap = h("div", { class: "mk-stage-wrap" }, stage, stageSpinner, zoomBtn, underHost, quadHint);
 
   // ---- side panel (right)
   const titleEl = h("h2", { class: "mk-side-title" });
@@ -1961,6 +2081,22 @@ async function mountEditor(el, ctx, name) {
     fields[key] = input;
     fieldEls.push(field({ label: t(`editor.field_${key}`), input, class: "mk-field" }));
   }
+  const modeTabs = tabs({
+    size: "sm",
+    ariaLabel: t("editor.mode_label"),
+    value: "rect",
+    items: [
+      { id: "rect", label: t("editor.mode_rect") },
+      { id: "quad", label: t("editor.mode_quad") },
+    ],
+    onChange: (id) => setMode(id),
+  });
+  const fieldsBox = h("div", { class: "mk-fields" }, fieldEls);
+  const quadNote = h("p", { class: "mk-quad-note" }, icon("info", { size: 14 }), h("span", null, t("editor.quad_note")));
+  quadNote.hidden = true;
+  const realismCtl = lookSlider("realism", t("editor.realism"), t("editor.realism_hint"));
+  const curveCtl = lookSlider("curve", t("editor.curve"), t("editor.curve_hint"));
+  const lookBox = h("div", { class: "mk-look-box" }, realismCtl.el, curveCtl.el);
   const designThumb = h("span", { class: "mk-design-thumb checker" });
   const designName = h("span", { class: "mk-design-name ellipsis" });
   const designRow = h(
@@ -1994,8 +2130,11 @@ async function mountEditor(el, ctx, name) {
     h("p", { class: "mk-helper" }, t("editor.helper")),
     disabledHost,
     h("div", { class: "mk-divider" }),
-    sectionTitle(t("editor.section_area")),
-    h("div", { class: "mk-fields" }, fieldEls),
+    sectionTitle(t("editor.section_area"), { actions: modeTabs.el }),
+    fieldsBox,
+    quadNote,
+    sectionTitle(t("editor.section_look")),
+    lookBox,
     sectionTitle(t("editor.section_preview")),
     designRow,
     h("div", { class: "mk-side-fill" }),
@@ -2068,9 +2207,7 @@ async function mountEditor(el, ctx, name) {
   }
   main.classList.remove("is-loading");
   sideSkeleton.remove();
-  saved = { ...areaRes.area };
-  area = { ...areaRes.area };
-  source = areaRes.source;
+  takeArea(areaRes);
   siblings = areaRes.same_size || [];
   // On unless a same-size mockup has an area of its own that differs from this one: after
   // one same-size save they all share it, and the switch stays on (the video's normal).
@@ -2080,6 +2217,8 @@ async function mountEditor(el, ctx, name) {
   renderSide();
   renderSame();
   renderRect();
+  renderQuad();
+  renderLook();
   updateState();
   setShowDesign(showDesign, { quiet: true });
 
@@ -2145,6 +2284,35 @@ async function mountEditor(el, ctx, name) {
     const handle = e.target.closest(".mk-handle");
     const inRect = e.target.closest(".mk-rect");
     const r = art.getBoundingClientRect();
+    if (quad) {
+      // Four corners: a corner handle moves that corner, a press inside the shape moves
+      // all four, a press outside draws a new rectangle that becomes four corners.
+      const corner = e.target.closest(".mk-qhandle");
+      const fx = (e.clientX - r.left) / r.width;
+      const fy = (e.clientY - r.top) / r.height;
+      drag = {
+        mode: corner ? "corner" : insideQuad(quad, fx, fy) ? "qmove" : "draw",
+        corner: corner ? Number(corner.dataset.corner) : -1,
+        startQuad: quad.map((pt) => [...pt]),
+        start: { ...area },
+        px: e.clientX,
+        py: e.clientY,
+        fx,
+        fy,
+        width: r.width,
+        height: r.height,
+        moved: false,
+        id: e.pointerId,
+      };
+      try {
+        art.setPointerCapture(e.pointerId);
+      } catch {
+        /* synthetic events */
+      }
+      e.preventDefault();
+      if (corner) corner.focus({ preventScroll: true });
+      return;
+    }
     drag = {
       mode: handle ? "resize" : inRect ? "move" : "draw",
       handle: handle ? handle.dataset.handle : null,
@@ -2176,8 +2344,12 @@ async function mountEditor(el, ctx, name) {
       art.classList.add("is-dragging", `drag-${drag.mode}`);
       // What the drag changes lights up at the side (the video's focused Genişlik and
       // Yükseklik while drawing), and Kaydet waits.
-      for (const key of drag.mode === "move" ? ["x", "y"] : ["w", "h"]) fields[key].classList.add("is-focus");
+      if (!quad) for (const key of drag.mode === "move" ? ["x", "y"] : ["w", "h"]) fields[key].classList.add("is-focus");
       saveBtn.classList.add("is-waiting");
+    }
+    if (quad) {
+      dragQuad(drag, ddx / drag.width, ddy / drag.height);
+      return;
     }
     setArea(computeDrag(drag, ddx / drag.width, ddy / drag.height, e.shiftKey));
   });
@@ -2185,7 +2357,7 @@ async function mountEditor(el, ctx, name) {
     if (!drag || e.pointerId !== drag.id) return;
     const was = drag;
     drag = null;
-    art.classList.remove("is-dragging", "drag-move", "drag-resize", "drag-draw");
+    art.classList.remove("is-dragging", "drag-move", "drag-resize", "drag-draw", "drag-corner", "drag-qmove");
     for (const key of ["x", "y", "w", "h"]) fields[key].classList.remove("is-focus");
     saveBtn.classList.remove("is-waiting");
     try {
@@ -2198,6 +2370,20 @@ async function mountEditor(el, ctx, name) {
   art.addEventListener("pointerup", endDrag);
   art.addEventListener("pointercancel", endDrag);
   art.addEventListener("dragstart", (e) => e.preventDefault());
+
+  // A focused corner moves with the arrow keys: 1 px, 10 px with Shift (mockup pixels).
+  quadHandles.forEach((el, i) =>
+    el.addEventListener("keydown", (e) => {
+      const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      const mv = moves[e.key];
+      if (!mv || !quad) return;
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      const next = quad.map((pt) => [...pt]);
+      next[i] = [clamp(next[i][0] + (mv[0] * step) / W(), 0, 1), clamp(next[i][1] + (mv[1] * step) / H(), 0, 1)];
+      if (setQuad(next)) schedulePreview();
+    }),
+  );
 
   rect.addEventListener("keydown", (e) => {
     const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -2275,6 +2461,184 @@ async function mountEditor(el, ctx, name) {
     return { x: left, y: top, w: right - left, h: bottom - top };
   }
 
+  /** The area, corners and look from an area payload (GET/POST/DELETE .../area). */
+  function takeArea(res) {
+    const a = res.area || {};
+    saved = { x: a.x, y: a.y, w: a.w, h: a.h };
+    area = { ...saved };
+    savedQuad = Array.isArray(a.quad) ? a.quad.map((pt) => [pt[0], pt[1]]) : null;
+    quad = savedQuad ? savedQuad.map((pt) => [...pt]) : null;
+    source = res.source;
+    takeStyle(res, { stored: a });
+  }
+
+  /** The type's defaults, and the realism and curve in use (`stored`: the area's own). */
+  function takeStyle(res, { stored } = {}) {
+    const st = res.style || {};
+    style = {
+      realism_default: st.realism_default || 0,
+      curve_default: st.curve_default || 0,
+      curve_offered: !!st.curve_offered,
+    };
+    const a = stored || {};
+    savedLook = { realism: st.realism ?? 0, curve: st.curve ?? 0 };
+    savedExplicit = { realism: a.realism !== undefined && a.realism !== null, curve: a.curve !== undefined && a.curve !== null };
+    look = { ...savedLook };
+    explicit = { ...savedExplicit };
+  }
+
+  /** Corners in pixels of the mockup, for the shape rules (no dent, no twist). */
+  function quadPx(q) {
+    return q.map(([x, y]) => [x * W(), y * H()]);
+  }
+
+  /** Take four corners if they make a valid shape (false: refused, nothing changes). */
+  function setQuad(next) {
+    const clean = next.map(([x, y]) => [clamp(x, 0, 1), clamp(y, 0, 1)]);
+    const box = quadBox(clean);
+    if (!wellShaped(quadPx(clean)) || box.w * W() < 12 || box.h * H() < 12) return false;
+    quad = clean;
+    area = box;
+    markStale();
+    renderQuad();
+    renderRect();
+    updateState();
+    return true;
+  }
+
+  function dragQuad(d, dx, dy) {
+    const s = d.startQuad;
+    if (d.mode === "corner") {
+      const next = s.map((pt) => [...pt]);
+      next[d.corner] = [clamp(s[d.corner][0] + dx, 0, 1), clamp(s[d.corner][1] + dy, 0, 1)];
+      setQuad(next);
+      return;
+    }
+    if (d.mode === "qmove") {
+      const xs = s.map((pt) => pt[0]);
+      const ys = s.map((pt) => pt[1]);
+      const mx = clamp(dx, -Math.min(...xs), 1 - Math.max(...xs));
+      const my = clamp(dy, -Math.min(...ys), 1 - Math.max(...ys));
+      setQuad(s.map(([x, y]) => [x + mx, y + my]));
+      return;
+    }
+    setQuad(rectQuad(computeDrag(d, dx, dy, false)));
+  }
+
+  function setMode(mode) {
+    if (mode === "quad" && !quad) setQuad(rectQuad(area));
+    else if (mode === "rect" && quad) {
+      quad = null;
+      markStale();
+      renderQuad();
+      renderRect();
+      updateState();
+    }
+    renderQuad();
+    schedulePreview();
+  }
+
+  function renderQuad() {
+    const on = !!quad;
+    art.classList.toggle("is-quad", on);
+    if (modeTabs.value !== (on ? "quad" : "rect")) modeTabs.update(null, on ? "quad" : "rect");
+    fieldsBox.hidden = on;
+    quadNote.hidden = !on;
+    if (!on) return;
+    quadPoly.setAttribute("points", quad.map(([x, y]) => `${x * 100},${y * 100}`).join(" "));
+    quad.forEach(([x, y], i) => {
+      const el = quadHandles[i];
+      el.style.left = `${x * 100}%`;
+      el.style.top = `${y * 100}%`;
+      el.setAttribute("aria-label", t("editor.corner_aria", { corner: t(`editor.corner_${CORNERS[i]}`), x: pct(x), y: pct(y) }));
+    });
+    placeQuadDesign();
+  }
+
+  /** The design drawn into the corners with a CSS perspective (matrix3d), fitted and
+   *  centred as the compositor fits it; the server's preview replaces it after a drag. */
+  function placeQuadDesign() {
+    const iw = quadDesign.naturalWidth;
+    const ih = quadDesign.naturalHeight;
+    const aw = art.clientWidth;
+    const ah = art.clientHeight;
+    const M = quad && iw && ih && aw && ah ? designMatrix(iw, ih, aw, ah) : null;
+    quadDesign.classList.toggle("is-placed", !!M);
+    if (!M) return;
+    quadDesign.style.width = `${iw}px`;
+    quadDesign.style.height = `${ih}px`;
+    quadDesign.style.transform = `matrix3d(${[M[0], M[3], 0, M[6], M[1], M[4], 0, M[7], 0, 0, 1, 0, M[2], M[5], 0, M[8]].join(",")})`;
+  }
+
+  function designMatrix(iw, ih, aw, ah) {
+    const P = quad.map(([x, y]) => [x * aw, y * ah]);
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const qw = (d(P[0], P[1]) + d(P[3], P[2])) / 2;
+    const qh = (d(P[0], P[3]) + d(P[1], P[2])) / 2;
+    if (qw < 1 || qh < 1) return null;
+    const k = Math.min(qw / iw, qh / ih);
+    const us = (iw * k) / qw;
+    const vs = (ih * k) / qh;
+    const u0 = (1 - us) / 2;
+    const v0 = (1 - vs) / 2;
+    const unit = homography([[0, 0], [1, 0], [1, 1], [0, 1]], P);
+    if (!unit) return null;
+    const at = (u, v) => applyH(unit, u, v);
+    const dst = [at(u0, v0), at(u0 + us, v0), at(u0 + us, v0 + vs), at(u0, v0 + vs)];
+    return homography([[0, 0], [iw, 0], [iw, ih], [0, ih]], dst);
+  }
+
+  /** A 0-100 slider for the look (realism, curve) in the watermark card's style. */
+  function lookSlider(key, label, hintText) {
+    const value = h("span", { class: "mk-wm-slider-value num" });
+    const hint = h("span", { class: "mk-look-hint", id: uid(`mk-look-${key}`) }, hintText);
+    const input = h("input", { type: "range", class: "mk-wm-range", min: "0", max: "100", step: "1", "aria-label": label, "aria-describedby": hint.id });
+    const reset = h("button", { type: "button", class: "mk-look-reset", onClick: () => setLook(key, style[`${key}_default`], false) }, icon("undo", { size: 12 }));
+    const ctl = { key, input, reset, value };
+    ctl.paint = () => {
+      const v = Number(input.value);
+      value.textContent = percent(v / 100, 0);
+      input.style.setProperty("--fill", `${v}%`);
+      input.setAttribute("aria-valuetext", percent(v / 100, 0));
+      const def = style[`${key}_default`];
+      const label2 = t("editor.look_reset", { value: percent(def / 100, 0) });
+      reset.title = label2;
+      reset.setAttribute("aria-label", label2);
+      reset.hidden = v === def;
+    };
+    input.addEventListener("input", () => setLook(key, Number(input.value), true));
+    ctl.el = h(
+      "div",
+      { class: "mk-wm-slider mk-look" },
+      h("span", { class: "mk-wm-slider-row", title: hintText }, h("span", { class: "mk-wm-label" }, label), h("span", { class: "spacer" }), reset, value),
+      input,
+      hint,
+    );
+    return ctl;
+  }
+
+  function setLook(key, v, isExplicit) {
+    look = { ...look, [key]: clamp(Math.round(v), 0, 100) };
+    explicit = { ...explicit, [key]: isExplicit };
+    renderLook();
+    updateState();
+    // The last preview stays until the new one has loaded, so the slider does not flicker.
+    schedulePreview();
+  }
+
+  function renderLook() {
+    for (const ctl of [realismCtl, curveCtl]) {
+      ctl.input.value = String(look[ctl.key]);
+      ctl.paint();
+    }
+    curveCtl.el.hidden = !(style.curve_offered || look.curve > 0);
+  }
+
+  /** What the screen shows, rounded as it is saved: a stale preview is recognised by it. */
+  function stateKey() {
+    return JSON.stringify([roundArea(area), roundQuad(quad), look.realism, look.curve]);
+  }
+
   function setArea(next) {
     const w = clamp(next.w, minW(), 1);
     const hh = clamp(next.h, minH(), 1);
@@ -2299,6 +2663,7 @@ async function mountEditor(el, ctx, name) {
     art.style.height = `${Math.max(1, Math.round(H() * scale))}px`;
     zoomVal.textContent = percent(zoom, 0);
     fitLabel();
+    placeQuadDesign();
   }
 
   function setZoom(next) {
@@ -2391,14 +2756,14 @@ async function mountEditor(el, ctx, name) {
     else st = badge({ text: t("editor.shared"), tone: "accent", title: t("area.same_size_hint") });
     mount(stateHost, st);
     const done = !dirty && source === "own";
-    const key = done ? "saved" : "draw";
+    const key = done ? "saved" : quad ? "corners" : "draw";
     if (underHost.dataset.state !== key) {
       underHost.dataset.state = key;
       mount(
         underHost,
         done
           ? h("span", { class: "mk-stage-pill is-done" }, icon("check", { size: 13, strokeWidth: 2.6 }), h("span", null, t("editor.saved_chip")))
-          : h("span", { class: "mk-stage-pill" }, icon("target", { size: 13 }), h("span", null, t("editor.draw_hint"))),
+          : h("span", { class: "mk-stage-pill" }, icon("target", { size: 13 }), h("span", null, t(quad ? "editor.corners_hint" : "editor.draw_hint"))),
       );
     }
     // Never drawn: Kaydet is dimmed like the video's until the area is drawn (a class of
@@ -2457,7 +2822,7 @@ async function mountEditor(el, ctx, name) {
   function ownDiffering() {
     return siblings.filter((n) => {
       const it = list.find((x) => x.name === n);
-      return !!it && it.area_source === "own" && !sameArea(it.area, saved);
+      return !!it && it.area_source === "own" && (!sameArea(it.area, saved) || !sameQuad(it.area.quad || null, savedQuad));
     });
   }
 
@@ -2547,6 +2912,7 @@ async function mountEditor(el, ctx, name) {
     design = { id: d.id, label: d.label, name: d.name, version: d.version };
     if (remember) writeStored("local", DESIGN_KEY, design);
     overlayImg.src = designUrl(ctx, design, 900);
+    quadDesign.src = overlayImg.src;
     renderDesignRow();
     markStale();
     loadPreview();
@@ -2574,18 +2940,21 @@ async function mountEditor(el, ctx, name) {
     if (!showDesign || !design || !area || drag || art.classList.contains("is-loading") || isGhost()) return;
     const seq = ++previewSeq;
     const a = roundArea(area);
+    const q = roundQuad(quad);
+    const key = stateKey();
     const img = new Image();
     img.className = "mk-preview";
     img.alt = "";
     img.draggable = false;
     img.onload = () => {
-      if (seq !== previewSeq || !showDesign || !sameArea(a, roundArea(area)) || !ctx.isActive()) return;
+      if (seq !== previewSeq || !showDesign || key !== stateKey() || !ctx.isActive()) return;
       img.hidden = false;
       previewImg.replaceWith(img);
       previewImg = img;
       art.classList.add("has-preview");
     };
-    img.src = ctx.api.url(`/api/mockups/${enc(name)}/preview`, { design: design.id, x: a.x, y: a.y, w: a.w, h: a.h, max: IMAGE_MAX });
+    const where = q ? { quad: q.flat().join(",") } : { x: a.x, y: a.y, w: a.w, h: a.h };
+    img.src = ctx.api.url(`/api/mockups/${enc(name)}/preview`, { design: design.id, ...where, realism: look.realism, curve: look.curve, max: IMAGE_MAX });
   }
 
   async function pickDesign() {
@@ -2636,11 +3005,22 @@ async function mountEditor(el, ctx, name) {
     saving = true;
     saveBtn.setLoading(true);
     try {
-      const body = { ...roundArea(area), same_size: !!(sameSize && siblings.length) };
+      // A realism or curve the seller did not touch is sent as null: it keeps following the
+      // mockup type (and each same-size mockup's own type).
+      const where = quad ? { quad: roundQuad(quad) } : roundArea(area);
+      const body = {
+        ...where,
+        realism: explicit.realism ? look.realism : null,
+        curve: explicit.curve ? look.curve : null,
+        same_size: !!(sameSize && siblings.length),
+      };
+      const sent = stateKey();
       const res = await ctx.api.post(`/api/mockups/${enc(name)}/area`, body, { signal: ctx.signal });
-      saved = { ...res.area };
-      if (sameArea(saved, area)) area = { ...saved };
-      source = res.source;
+      // Edits made while the save was on its way stay on screen (and unsaved).
+      const mine = { area: { ...area }, quad: quad && quad.map((pt) => [...pt]), look: { ...look }, explicit: { ...explicit } };
+      const changed = stateKey() !== sent;
+      takeArea(res);
+      if (changed) ({ area, quad, look, explicit } = mine);
       siblings = res.same_size || siblings;
       lastApplied = res.applied_to || [name];
       for (const n of lastApplied) applied.add(n);
@@ -2648,13 +3028,15 @@ async function mountEditor(el, ctx, name) {
       appliedTitle.textContent = t("editor.applied_title", { n: lastApplied.length });
       for (const it of list) {
         if (lastApplied.includes(it.name)) {
-          it.area = { ...saved };
+          it.area = { ...res.area };
           it.area_source = "own";
         }
       }
       renderLibrary();
       renderSame();
       renderRect();
+      renderQuad();
+      renderLook();
       updateState();
       // In a short window the side column scrolls: bring the notice into view.
       requestAnimationFrame(() => {
@@ -2672,8 +3054,13 @@ async function mountEditor(el, ctx, name) {
   function cancel() {
     if (isDirty()) {
       area = { ...saved };
+      quad = savedQuad ? savedQuad.map((pt) => [...pt]) : null;
+      look = { ...savedLook };
+      explicit = { ...savedExplicit };
       markStale();
       renderRect();
+      renderQuad();
+      renderLook();
       updateState();
       loadPreview();
       return;
@@ -2686,14 +3073,14 @@ async function mountEditor(el, ctx, name) {
     if (!ok) return;
     try {
       const res = await ctx.api.del(`/api/mockups/${enc(name)}/area`, null, { signal: ctx.signal });
-      saved = { ...res.area };
-      area = { ...res.area };
-      source = res.source;
+      takeArea(res);
       lastApplied = null;
       applied.delete(name);
       storeApplied();
       markStale();
       renderRect();
+      renderQuad();
+      renderLook();
       renderSame();
       updateState();
       loadPreview();
@@ -2751,6 +3138,23 @@ async function mountEditor(el, ctx, name) {
     renderSide();
     renderLibrary();
     renderSame();
+    // A new type brings its own realism and curve defaults (and maybe the curve slider).
+    try {
+      const fresh = await ctx.api.get(`/api/mockups/${enc(name)}/area`, null, { signal: ctx.signal });
+      const keep = { look: { ...look }, explicit: { ...explicit } };
+      takeStyle(fresh, { stored: fresh.area });
+      for (const key of ["realism", "curve"]) {
+        if (keep.explicit[key]) {
+          look[key] = keep.look[key];
+          explicit[key] = true;
+        }
+      }
+      renderLook();
+      updateState();
+      schedulePreview();
+    } catch (err) {
+      if (!ctx.api.isAbort(err)) console.warn("[mockups] could not refresh the print area", err);
+    }
   }
 
   function openSideMenu() {
