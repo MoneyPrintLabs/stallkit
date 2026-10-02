@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-10-02
+
 ### Added
 - **Realistic mockups.** A design no longer sits flat on top of the photo:
   - *Gerçekçilik* (realism, 0-100): the design takes the mockup's own light, folds and
@@ -510,7 +512,8 @@ Recorded here and in the code so nobody has to re-derive them:
 - There is no idempotency key, so non-idempotent writes are never retried on a timeout
   or a 5xx — a repeat would mean a duplicate listing, or a second email to a buyer.
 
-[Unreleased]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/MoneyPrintLabs/stallkit/releases/tag/v0.3.1
 [0.3.0]: https://github.com/MoneyPrintLabs/stallkit/releases/tag/v0.3.0

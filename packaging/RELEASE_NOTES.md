@@ -1,3 +1,14 @@
+**0.3.3 makes your mockups look real.** The design now takes the mockup's own light, folds
+and fabric texture (**Gerçekçilik**), can be placed on four corners for angled frames and
+walls (**4 köşe**), and wraps around mugs (**Kavis**). Set them per mockup in **Mockuplar**;
+existing mockups keep working, and with the sliders at 0 the result is exactly what 0.3.2 made.
+
+**0.3.3 mockup'larınızı gerçek gösterir.** Tasarım artık mockup'ın ışığını, kıvrımlarını ve
+kumaş dokusunu alıyor (**Gerçekçilik**), eğik duran çerçeve ve duvarlar için dört köşeden
+yerleştirilebiliyor (**4 köşe**) ve kupanın etrafına sarılıyor (**Kavis**). **Mockuplar**'da
+her mockup için ayarlanır; eski mockup'lar çalışmaya devam eder, ayarlar 0'dayken sonuç
+0.3.2'dekiyle birebir aynıdır.
+
 **0.3.2 looks and works like the video, and adds what sellers asked for.**
 
 - **Watermark:** upload your own mark on **Mockuplar**; choose position (centre, corner or
