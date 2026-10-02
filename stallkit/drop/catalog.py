@@ -579,7 +579,9 @@ def save_area(
     its corners, realism and curve included.
 
     keep_style: change only where the print goes; each target keeps the realism and
-    curve it had (the CLI's --area, which has no say in them).
+    curve it had (the CLI's --area, which has no say in them). Without it, a realism or
+    curve that `area` leaves on None still keeps another mockup's own value (the editor
+    sends None for a slider the seller did not touch).
     Returns the names that were — or with dry_run, would be — changed.
     """
     _mockup_path(ws, name)
@@ -598,6 +600,14 @@ def save_area(
             old = positions.get(target)
             if keep_style and old is not None:
                 positions[target] = replace(area, realism=old.realism, curve=old.curve)
+            elif target != name and old is not None:
+                # A realism or curve left on the default (None) is not a setting, so a
+                # sibling keeps its own instead of being reset to its type's default.
+                positions[target] = replace(
+                    area,
+                    realism=old.realism if area.realism is None else area.realism,
+                    curve=old.curve if area.curve is None else area.curve,
+                )
             else:
                 positions[target] = area
         mockup.save_positions(ws.positions_path, positions)

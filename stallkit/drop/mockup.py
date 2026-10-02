@@ -559,7 +559,9 @@ def place(canvas: Image.Image, design: Image.Image, area: PrintArea, *,
     """
     area = styled(area, kind)
     realism, curve = area.realism or 0, area.curve or 0
-    displace = realism > 0 and kind not in RIGID_TYPES
+    # Rigid products and anything curved (a tumbler or a bottle typed 'other') have no
+    # folds: their highlight bands would only make the print wobble.
+    displace = realism > 0 and kind not in RIGID_TYPES and curve == 0
     if area.quad is not None or curve > 0 or displace:
         surface.render(canvas, design, area.corners(*canvas.size),
                        realism=realism, curve=curve, displace=displace)

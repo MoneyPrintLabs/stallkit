@@ -42,6 +42,10 @@ MIN_CORNER_SHARE = 0.08
 # cylinder's edges), it is drawn up to SUPERSAMPLE_MAX times larger and reduced.
 SUPERSAMPLE_BELOW = 0.6
 SUPERSAMPLE_MAX = 4
+# The most pixels drawn at once while supersampling (about 100 MB in RGBa): a larger
+# canvas is drawn in horizontal bands, so a steep area on a 7000 px mockup needs no
+# more memory than one on a 2000 px mockup.
+SUPERSAMPLE_PIXELS = 24_000_000
 
 # The widest angle the front of the cylinder covers each side of its middle, at curve 100.
 PHI_MAX = math.radians(75)
@@ -313,14 +317,17 @@ def render(
         return
     phi = _phi(curve)
     unroll = phi / math.sin(phi) if phi > 1e-6 else 1.0
-    scale = min(qw * unroll / design.width, qh / design.height)
+    # The arc moves the design's middle down and its edges up by half the arc each, so
+    # that much of the height is kept free: the bent design stays inside the area.
+    arc_frac = ARC_MAX * max(0.0, min(100.0, curve)) / 100.0 if phi > 1e-6 else 0.0
+    scale = min(qw * unroll / design.width, qh * (1.0 - arc_frac) / design.height)
     uspan = min(1.0, design.width * scale / (qw * unroll))
     vspan = min(1.0, design.height * scale / qh)
     u0, v0 = (1.0 - uspan) / 2.0, (1.0 - vspan) / 2.0
     short_side = min(qw, qh)
     k = max(0.0, min(100.0, realism)) / 100.0
     amp = DISPLACE_MAX * k * short_side if displace else 0.0
-    arc = ARC_MAX * (curve / 100.0) * qh if phi > 1e-6 else 0.0
+    arc = arc_frac * qh
 
     margin = math.ceil(amp + arc / 2 + 2)
     xs = [x for x, _ in corners]
@@ -364,17 +371,22 @@ def render(
     # drawn `factor` times larger and box-reduced, which averages what was squeezed.
     squeeze = min(_side_ratio(rel), math.cos(phi))
     factor = 1 if squeeze >= SUPERSAMPLE_BELOW else min(SUPERSAMPLE_MAX, math.ceil(SUPERSAMPLE_BELOW / max(squeeze, 1e-6)))
-    big = (box_w * factor, box_h * factor)
     # Drawn larger and averaged down, bilinear is as smooth as bicubic and much quicker.
     resample = Image.BICUBIC if factor == 1 else Image.BILINEAR
+    # Rows of the box drawn per pass, a whole number of mesh cells so the bands join
+    # exactly as one pass would (SUPERSAMPLE_PIXELS).
+    rows = SUPERSAMPLE_PIXELS // (box_w * factor * factor) // MESH_CELL * MESH_CELL
+    rows = box_h if rows >= box_h else max(MESH_CELL, rows)
     if phi <= 1e-6 and amp <= 0:
         a, b, c, d, e, f, g, h = to_unit
         coeffs = (kx * a + bx * g, kx * b + bx * h, kx * c + bx,
                   ky * d + by * g, ky * e + by * h, ky * f + by, g, h)
         coeffs = tuple(value / factor if index not in (2, 5) else value
                        for index, value in enumerate(coeffs))
-        layer = source.transform(big, Image.PERSPECTIVE, coeffs, resample,
-                                 fillcolor=(0, 0, 0, 0))
+
+        def band(top: int, size: tuple[int, int]) -> Image.Image:
+            return source.transform(size, Image.PERSPECTIVE, _shifted(coeffs, top), resample,
+                                    fillcolor=(0, 0, 0, 0))
     else:
         offsets = _fold_map(base, ref if ref is not None else 128, short_side).load() if amp > 0 else None
 
@@ -392,13 +404,38 @@ def render(
                 u, v = s, t
             return bx + u * kx, by + v * ky
 
-        layer = _mesh(source, big, source_point, cell=MESH_CELL * factor, resample=resample)
-    if factor > 1:
-        layer = layer.reduce(factor)
+        def band(top: int, size: tuple[int, int]) -> Image.Image:
+            return _mesh(source, size, lambda px, py: source_point(px, py + top),
+                         cell=MESH_CELL * factor, resample=resample)
+
+    if rows >= box_h:
+        layer = band(0, (box_w * factor, box_h * factor))
+        if factor > 1:
+            layer = layer.reduce(factor)
+    else:
+        layer = Image.new("RGBa", (box_w, box_h), (0, 0, 0, 0))
+        for top in range(0, box_h, rows):
+            height = min(rows, box_h - top)
+            strip = band(top * factor, (box_w * factor, height * factor))
+            layer.paste(strip.reduce(factor) if factor > 1 else strip, (0, top))
     layer = layer.convert("RGBA")
     if ref is not None:
         layer = shade(layer, base, ref, realism, short_side)
     canvas.paste(layer, (x0, y0), layer)
+
+
+def _shifted(coeffs: tuple[float, ...], top: float) -> tuple[float, ...]:
+    """PERSPECTIVE coefficients for output drawn from row `top` down: the same map with
+    y + top in place of y, scaled back to a denominator constant of 1 (a projective map
+    is unchanged by a common factor)."""
+    if not top:
+        return coeffs
+    a, b, c, d, e, f, g, h = coeffs
+    den = h * top + 1.0
+    if abs(den) < 1e-12:  # the band starts on the horizon, which is never in the area
+        den = math.copysign(1e-12, den)
+    return (a / den, b / den, (b * top + c) / den, d / den, e / den, (e * top + f) / den,
+            g / den, h / den)
 
 
 def _mesh(source: Image.Image, size: tuple[int, int], source_point, *, cell: int = MESH_CELL,

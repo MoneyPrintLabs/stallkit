@@ -20,17 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     rectangle, and the design is placed in perspective (a framed print shot at an
     angle, a tilted phone case). Each corner can also be moved with the arrow keys.
   - *Kavis* (curve, 0-100): the design wraps round a mug, tumbler or bottle, narrower and
-    a little darker towards the sides, with a slight arc. On by default (55) for mugs and
-    offered for the *other* type too.
+    a little darker towards the sides, with a slight arc that stays inside the print area.
+    On by default (55) for mugs and offered for the *other* type too. A curved product is
+    rigid, so its highlights are never read as folds.
   The print-area editor in **Mockuplar** has the shape switch and both sliders, with a
   live preview drawn by the same code as the drafts. *Aynı ölçüdeki mockup'lara da
-  uygula* copies the corners and the settings as well; a same-size mockup that only
-  borrows the area keeps its own type's realism and curve. Tasarım Yükle, `drop run`,
+  uygula* copies the corners and the settings as well; a slider left on its default does
+  not overwrite another mockup's own value, and a same-size mockup that only borrows the
+  area keeps its own type's realism and curve. Tasarım Yükle, `drop run`,
   `drop auto` and the watermark preview all composite this way, and the watermark still
   goes on afterwards. Existing print areas keep working; with realism and curve at 0
   they render exactly as before. Corners, realism and curve are stored in
   `positions.json` next to `x`, `y`, `w`, `h`, which still hold the area's bounding box.
-  A 2000 px composite takes about 0.2-0.4 s.
+  A 2000 px composite takes about 0.2-0.4 s. A steep perspective is drawn larger and
+  averaged down so it does not shimmer; on a large mockup that is done in bands, so it
+  needs about half the memory it otherwise would (about 0.4 GB at 4000 px).
 
 ## [0.3.2] — 2026-09-30
 

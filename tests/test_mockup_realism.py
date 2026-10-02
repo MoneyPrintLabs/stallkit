@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageChops, ImageDraw, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 from test_drop_stream import studio  # noqa: F401
 
 from stallkit.drop import catalog, mockup, surface
@@ -263,6 +263,92 @@ def test_mugs_are_curved_by_default_and_shirts_are_not():
     assert diff_stats(placed(canvas, stripes(), area, kind="tshirt"), flat)[0] < 1
 
 
+def test_the_curve_keeps_a_tall_design_inside_its_area():
+    # The arc bends the design's middle down and its edges up; the fit leaves room for it.
+    canvas = Image.new("RGB", (1250, 1000), WHITE)
+    area = mockup.PrintArea(0.36, 0.34, 0.22, 0.30, realism=0, curve=100)
+    out = placed(canvas, solid((400, 800)), area, kind="mug")
+    box_x, box_y, box_w, box_h = area.pixels(*canvas.size)
+    left, top, right, bottom = ImageChops.difference(out, canvas).getbbox()
+    # Inside, but for the one row of anti-aliasing an edge that fits exactly has
+    # (before, the arc pushed the middle 19 px past the bottom).
+    assert box_x <= left and right <= box_x + box_w
+    assert box_y <= top and bottom <= box_y + box_h + 1
+    assert sum(out.getpixel(((left + right) // 2, box_y + box_h))) > 3 * 225
+    assert bottom > box_y + box_h - 4  # still filled to the bottom
+
+
+def highlight_canvas(size=(1000, 1000)) -> Image.Image:
+    """Grey with soft horizontal highlight bands, as on a steel tumbler."""
+    canvas = Image.new("RGB", size, (120, 120, 120))
+    draw = ImageDraw.Draw(canvas)
+    for y in range(0, size[1], 90):
+        draw.rectangle((0, y, size[0], y + 18), fill=(235, 235, 235))
+    return canvas.filter(ImageFilter.GaussianBlur(6))
+
+
+def test_a_curved_other_product_is_rigid_and_its_edges_stay_straight():
+    canvas = highlight_canvas()
+    design = Image.new("RGBA", (400, 400), (40, 60, 200, 255))
+    ImageDraw.Draw(design).rectangle((0, 0, 199, 400), fill=(220, 30, 30, 255))
+    area = mockup.PrintArea(0.25, 0.25, 0.5, 0.5, realism=35, curve=55)
+    other = placed(canvas, design, area, kind="other")
+    # The same as a mug (rigid), and the red/blue boundary is one straight column.
+    assert ImageChops.difference(other, placed(canvas, design, area, kind="mug")).getbbox() is None
+    edges = set()
+    for y in range(300, 700, 7):
+        row = [other.getpixel((x, y)) for x in range(420, 580)]
+        edges.add(next(i for i, p in enumerate(row) if p[2] > p[0]))
+    assert max(edges) - min(edges) <= 1
+    # A shirt with the same realism and no curve still follows its folds.
+    flat = mockup.PrintArea(0.25, 0.25, 0.5, 0.5, realism=35, curve=0)
+    assert ImageChops.difference(placed(canvas, design, flat, kind="tshirt"),
+                                 placed(canvas, design, flat, kind="poster")).getbbox() is not None
+
+
+# --- memory -------------------------------------------------------------------------------------
+
+STEEP = [[0.42, 0.15], [0.58, 0.15], [0.95, 0.85], [0.05, 0.85]]
+
+
+def record_transforms(monkeypatch) -> list[tuple[int, int]]:
+    sizes = []
+    original = Image.Image.transform
+
+    def transform(self, size, *args, **kwargs):
+        sizes.append(tuple(size))
+        return original(self, size, *args, **kwargs)
+
+    monkeypatch.setattr(Image.Image, "transform", transform)
+    return sizes
+
+
+def test_supersampling_a_steep_area_on_a_large_mockup_stays_within_budget(monkeypatch):
+    sizes = record_transforms(monkeypatch)
+    canvas = Image.new("RGB", (4000, 4000), WHITE)
+    area = mockup.PrintArea.from_quad(STEEP, realism=0, curve=0)
+    assert surface.is_well_shaped(area.corners(1, 1))
+    out = placed(canvas, solid((800, 600)), area, kind="poster")
+    assert len(sizes) > 1  # supersampled, in bands
+    assert all(w * h <= surface.SUPERSAMPLE_PIXELS for w, h in sizes)
+    assert sum(w * h for w, h in sizes) > 2 * 3600 * 2800  # at more than the output size
+    # The design's middle lands where the diagonals cross, near the far (narrow) side.
+    assert is_red(out.getpixel((2000, 1100))) and out.getpixel((2000, 3000)) == WHITE
+
+
+@pytest.mark.parametrize("realism, curve, kind", [(0, 0, "poster"), (60, 0, "tshirt"), (0, 70, "mug")])
+def test_bands_draw_exactly_what_one_pass_draws(monkeypatch, realism, curve, kind):
+    canvas = fold_canvas((600, 600))
+    area = mockup.PrintArea.from_quad(STEEP, realism=realism, curve=curve)
+    one = placed(canvas, stripes((300, 240), every=30), area, kind=kind)
+    sizes = record_transforms(monkeypatch)
+    monkeypatch.setattr(surface, "SUPERSAMPLE_PIXELS", 300_000)
+    banded = placed(canvas, stripes((300, 240), every=30), area, kind=kind)
+    assert len(sizes) > 3 and all(w * h <= 300_000 for w, h in sizes)
+    mean, top = diff_stats(one, banded)
+    assert mean < 0.01 and top <= 2
+
+
 # --- compose, positions.json, the catalog ------------------------------------------------------------
 
 
@@ -335,6 +421,29 @@ def test_same_size_save_copies_the_corners_and_settings_and_the_catalog_is_untou
     infos = catalog.load(ws)
     mug = mockup.styled(stored["c-mug.png"], catalog.kind_of(infos, "c-mug.png"))
     assert (mug.realism, mug.curve) == (30, mockup.CURVE_DEFAULTS["mug"])
+
+
+def test_a_same_size_save_keeps_a_siblings_own_realism_and_curve_when_left_on_default(ws):
+    for name in ("a-tshirt.png", "b-tote.png", "c-mug.png"):
+        Image.new("RGB", (300, 300), WHITE).save(ws.mockups / name)
+    catalog.save_area(ws, "b-tote.png", mockup.PrintArea(0.1, 0.1, 0.5, 0.5, realism=20))
+    catalog.save_area(ws, "c-mug.png", mockup.PrintArea(0.1, 0.1, 0.5, 0.5, realism=5, curve=90))
+    area = mockup.PrintArea(0.3, 0.3, 0.4, 0.4)  # the editor's sliders left untouched
+    assert catalog.save_area(ws, "a-tshirt.png", area, same_size=True) == [
+        "a-tshirt.png", "b-tote.png", "c-mug.png"]
+    stored = mockup.load_positions(ws.positions_path)
+    assert stored["a-tshirt.png"] == area
+    assert stored["b-tote.png"] == mockup.PrintArea(0.3, 0.3, 0.4, 0.4, realism=20)
+    assert stored["c-mug.png"] == mockup.PrintArea(0.3, 0.3, 0.4, 0.4, realism=5, curve=90)
+    # A value the seller did set goes to every mockup of the size; the other one stays.
+    catalog.save_area(ws, "a-tshirt.png", mockup.PrintArea(0.3, 0.3, 0.4, 0.4, realism=70),
+                      same_size=True)
+    stored = mockup.load_positions(ws.positions_path)
+    assert (stored["b-tote.png"].realism, stored["b-tote.png"].curve) == (70, None)
+    assert (stored["c-mug.png"].realism, stored["c-mug.png"].curve) == (70, 90)
+    # The mockup being edited takes the area as sent: None puts it back on its default.
+    catalog.save_area(ws, "c-mug.png", mockup.PrintArea(0.3, 0.3, 0.4, 0.4))
+    assert mockup.load_positions(ws.positions_path)["c-mug.png"] == mockup.PrintArea(0.3, 0.3, 0.4, 0.4)
 
 
 def test_the_cli_area_keeps_realism_and_curve(ws):
