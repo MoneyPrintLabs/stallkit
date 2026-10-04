@@ -572,3 +572,74 @@ def test_a_huge_jpeg_still_gets_a_thumbnail(web, ws):
     resp = web.client.get("/api/files/thumb", params={"path": "1-MOCKUPS/big-photo.jpg", "w": 400})
     assert resp.status_code == 200
     assert open_image(resp.content).size == (400, 400)
+
+
+# --- four corners, realism and curve -------------------------------------------------------------
+
+
+QUAD = [[0.2, 0.25], [0.8, 0.2], [0.75, 0.8], [0.25, 0.85]]
+
+
+def test_area_with_four_corners_and_a_realism_is_saved_for_the_same_size_ones(web, ws):
+    put(ws, "a-tshirt-white.png", png((300, 300)))
+    put(ws, "b-tote-cream.png", png((300, 300)))
+    put(ws, "c-mug.png", png((400, 300)))
+    resp = web.client.post("/api/mockups/a-tshirt-white.png/area",
+                           json={"quad": QUAD, "realism": 30, "curve": None, "same_size": True})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied_to"] == ["a-tshirt-white.png", "b-tote-cream.png"]
+    assert body["area"]["quad"] == QUAD and body["area"]["realism"] == 30
+    assert "curve" not in body["area"]  # null: the type's default
+    assert (body["area"]["x"], body["area"]["w"]) == (0.2, 0.6)
+    assert body["style"] == {"kind": "tshirt", "realism": 30, "curve": 0, "realism_default": 65,
+                             "curve_default": 0, "curve_offered": False}
+    stored = mockup.load_positions(ws.positions_path)
+    assert stored["b-tote-cream.png"].quad == tuple(tuple(p) for p in QUAD)
+    assert stored["b-tote-cream.png"].realism == 30
+    mug = web.client.get("/api/mockups/c-mug.png/area").json()
+    assert mug["style"]["realism"] == mockup.REALISM_DEFAULTS["mug"]
+    assert mug["style"]["curve"] == mockup.CURVE_DEFAULTS["mug"] and mug["style"]["curve_offered"]
+    # Back to a rectangle: the corners go, the settings sent stay.
+    resp = web.client.post("/api/mockups/a-tshirt-white.png/area",
+                           json={"x": 0.3, "y": 0.2, "w": 0.4, "h": 0.5, "realism": 0, "curve": 0})
+    assert resp.json()["area"] == {"x": 0.3, "y": 0.2, "w": 0.4, "h": 0.5, "realism": 0, "curve": 0}
+
+
+@pytest.mark.parametrize("body, code", [
+    ({"quad": [[0.2, 0.2], [0.8, 0.8], [0.8, 0.2], [0.2, 0.8]]}, "bad_area"),  # twisted
+    ({"quad": [[0.2, 0.2], [0.5, 0.5], [0.8, 0.8], [0.2, 0.8]]}, "bad_area"),  # flattened
+    ({"quad": [[0.2, 0.2], [1.3, 0.2], [0.8, 0.8], [0.2, 0.8]]}, "bad_area"),  # off the edge
+    ({"quad": [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8]]}, "invalid"),
+    ({"quad": [[0.2, 0.2], [0.8, "a"], [0.8, 0.8], [0.2, 0.8]]}, "invalid"),
+    ({"quad": {"tl": [0.2, 0.2]}}, "invalid"),
+    ({"x": 0.1, "y": 0.1, "w": 0.4, "h": 0.4, "realism": 150}, "invalid"),
+    ({"x": 0.1, "y": 0.1, "w": 0.4, "h": 0.4, "realism": "lots"}, "invalid"),
+    ({"x": 0.1, "y": 0.1, "w": 0.4, "h": 0.4, "curve": True}, "invalid"),
+    ({"x": 0.1, "y": 0.1, "w": 0.4, "h": 0.4, "curve": -5}, "invalid"),
+])
+def test_area_refuses_bad_corners_and_settings(web, ws, body, code):
+    put(ws, "tshirt.png", png())
+    resp = web.client.post("/api/mockups/tshirt.png/area", json=body)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == code
+    assert not ws.positions_path.exists()
+
+
+def test_preview_draws_four_corners_with_the_settings_asked_for(web, ws):
+    put(ws, "mug.png", png((400, 400), colour=(240, 240, 240)))
+    quad = ",".join(str(v) for point in QUAD for v in point)
+    resp = web.client.get("/api/mockups/mug.png/preview",
+                          params={"design": "sample", "quad": quad, "realism": 60, "curve": 40,
+                                  "max": 400})
+    assert resp.status_code == 200, resp.text
+    image = open_image(resp.content).convert("RGB")
+    assert image.getpixel((5, 5)) == pytest.approx((240, 240, 240), abs=6)
+    r, g, b = image.getpixel((200, 140))
+    assert r > 150 and r > b
+    for params in ({"quad": "0.1,0.1,0.9"}, {"quad": "0.2,0.2,0.8,0.8,0.8,0.2,0.2,0.8"},
+                   {"realism": 101}):
+        bad = web.client.get("/api/mockups/mug.png/preview", params=params)
+        assert bad.status_code == 422, params
+    # Only a realism: the saved (here: default) area with it.
+    assert web.client.get("/api/mockups/mug.png/preview", params={"realism": 0}).status_code == 200

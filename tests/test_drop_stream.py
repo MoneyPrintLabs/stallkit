@@ -937,3 +937,86 @@ def test_free_tag_slots_skip_the_template_designs_own_tags(studio):
     assert "your template listing's tags" in item.evidence
     # The search named the template's product: "print" alone would search posters.
     assert client.searches and set(client.searches) == {"dog dad paw print shirt"}
+
+
+# --- a draft avoids the tags the shop's other drafts carry ------------------------------------------
+
+
+def _expected_tags(report, template, hint):
+    """What the tags of each product are when every product before it is known: the same rule,
+    applied one product at a time."""
+    from stallkit.drop import generate
+
+    done: list[list[str]] = []
+    for item in report.items:
+        tags = generate.build_tags(item.seed, item.market, product_hint=hint, taken=list(done))
+        generate.fill_tags(tags, generate.product_tags(template.tags, template.source_title,
+                                                       item.seed, hint=hint))
+        done.append(tags[:13])
+    return done
+
+
+def test_each_product_avoids_the_tags_of_the_products_before_it(studio):
+    from stallkit.drop import generate
+
+    ws, template = studio
+    template.source_title = "Black Cat Shirt"
+    template.tags = ["gift idea", "graphic tee", "unisex tshirt", "cat lover gift"]
+    for name in ("black-cat-magic", "black-cat-moon", "black-cat-garden", "black-cat-night",
+                 "black-cat-witch"):
+        _artwork(ws.products / f"{name}.png")
+    # Three products are prepared at once: the tags still come out as if one at a time.
+    report = _run(ws, template, Client(ws), concurrency=3)
+    assert all(item.status == stream.OK for item in report.items)
+    hint = generate.hint_from(template.source_title, template.tags, template.description,
+                              template.materials)
+    expected = _expected_tags(report, template, hint)
+    assert [item.tags for item in report.items] == expected
+    for a in range(len(expected)):
+        for b in range(a):
+            assert len(set(expected[a]) & set(expected[b])) < 7, (a, b)
+    # Without that rule these five would share most of their thirteen tags.
+    alone = [generate.build_tags(i.seed, i.market, product_hint=hint) for i in report.items]
+    assert max(len(set(alone[a]) & set(alone[b])) for a in range(5) for b in range(a)) >= 7
+
+
+def test_the_history_keeps_each_drafts_tags_and_the_next_run_avoids_them(studio):
+    ws, template = studio
+    _artwork(ws.products / "black-cat-magic.png")
+    first = _run(ws, template, Client(ws))
+    first_tags = first.items[0].tags
+    entry = _history(ws)[SHOP]["black-cat-magic.png"]
+    assert entry["tags"] == first_tags and entry["status"] == "ok"
+
+    _artwork(ws.products / "black-cat-moon.png")
+    second = _run(ws, template, Client(ws))
+    assert [i.name for i in second.items] == ["black-cat-moon.png"]
+    new = second.items[0].tags
+    assert len(set(new) & set(first_tags)) < 7
+    assert _history(ws)[SHOP]["black-cat-moon.png"]["tags"] == new
+
+
+def test_history_written_before_tags_were_kept_does_not_stop_a_run(studio):
+    ws, template = studio
+    _artwork(ws.products / "black-cat-magic.png")
+    _run(ws, template, Client(ws))
+    history = _history(ws)
+    del history[SHOP]["black-cat-magic.png"]["tags"]
+    (ws.root / "upload-history.json").write_text(json.dumps(history), encoding="utf-8")
+    _artwork(ws.products / "black-cat-moon.png")
+    report = _run(ws, template, Client(ws))
+    assert report.items[0].status == stream.OK and len(report.items[0].tags) == 13
+
+
+def test_a_product_that_fails_before_its_copy_does_not_hold_up_the_ones_after_it(studio):
+    ws, template = studio
+    (ws.products / "IMG_0001.png").write_bytes(b"not a picture")  # a junk name: fails at once
+    _artwork(ws.products / "black-cat-magic.png")
+    _artwork(ws.products / "black-cat-moon.png")
+    started = time.perf_counter()
+    report = _run(ws, template, Client(ws), concurrency=3)
+    assert time.perf_counter() - started < 30
+    by_name = {i.name: i for i in report.items}
+    assert by_name["IMG_0001.png"].status == stream.FAILED
+    assert by_name["black-cat-magic.png"].status == stream.OK
+    assert by_name["black-cat-moon.png"].status == stream.OK

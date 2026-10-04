@@ -26,6 +26,7 @@ from .config import Config, home_dir, split_credential, token_path, write_env_fi
 from .drop import automation, pipeline
 from .drop import catalog as catalog_mod
 from .drop import description as description_mod
+from .drop import generate as generate_mod
 from .drop import infoimages as infoimages_mod
 from .drop import mockup as mockup_mod
 from .drop import template as template_mod
@@ -965,8 +966,10 @@ def seo_audit(
         _warn(f"No {state} listings to audit.")
         raise typer.Exit(1)
 
-    audits = [seo_mod.audit_listing(listing) for listing in listings]
+    # The shop first: two of the checks (tags shared with another listing, a tag list of
+    # the shop's generic tags) compare each listing with the others.
     shop = seo_mod.audit_shop(listings)
+    audits = [seo_mod.audit_listing(listing, shop) for listing in listings]
 
     audits.sort(key=lambda a: a.score)
     average = sum(a.score for a in audits) / len(audits)
@@ -1176,7 +1179,19 @@ def seo_suggest(
         _warn(f"No market data for {term!r}.")
         return
 
-    suggestions = seo_mod.suggest_tags(report, existing=listing.get("tags") or [])
+    # The draft builder's rules: no near-duplicate of a tag the listing has, no adhesive
+    # claim ("removable") the listing does not make, and no more of the generic tags than
+    # a listing can afford.
+    chosen = generate_mod.suggest_additions(
+        report, existing=listing.get("tags") or [], title=listing.get("title") or "",
+        text=generate_mod.hint_from(
+            listing.get("title") or "", listing.get("tags") or [],
+            listing.get("description") or "", listing.get("materials") or [],
+        ),
+    )
+    suggestions = seo_mod.suggest_tags(
+        report, existing=listing.get("tags") or [], candidates=[tag for tag, _n in chosen]
+    )
 
     def _line(tag: str) -> str:
         count = next((c for t, c in report.tags if t == tag), 0)
@@ -1637,12 +1652,19 @@ def drop_calibrate(
             )
             raise typer.Exit(1)
         # Writes positions.json itself unless this is a dry run.
+        # --area moves the print; corners aside, each mockup keeps its realism and curve.
         names = catalog_mod.save_area(
-            ws, selected[0].name, new_area, same_size=same_size, dry_run=dry_run, sizes=sizes
+            ws, selected[0].name, new_area, same_size=same_size, dry_run=dry_run, sizes=sizes,
+            keep_style=True,
         )
         targets = [p for p in mockups if p.name in names]
         for target in targets:
-            positions[target.name] = new_area
+            old = positions.get(target.name)
+            positions[target.name] = (
+                mockup_mod.PrintArea(new_area.x, new_area.y, new_area.w, new_area.h,
+                                     realism=old.realism, curve=old.curve)
+                if old is not None else new_area
+            )
         changed = targets
         selected = targets
 
@@ -1751,7 +1773,8 @@ def _print_print_areas(
         table.add_row(
             path.name,
             f"{size[0]}x{size[1]}" if size else "unreadable",
-            ",".join(format(value, "g") for value in (area.x, area.y, area.w, area.h)),
+            ",".join(format(value, "g") for value in (area.x, area.y, area.w, area.h))
+            + (" (4 corners)" if area.quad is not None else ""),
             source,
         )
     console.print(table)

@@ -335,6 +335,23 @@ def shop_history(state: dict, shop: str | None) -> dict:
     return history
 
 
+def used_tags(history: dict) -> list[list[str]]:
+    """The tags of every draft in a shop's history, oldest first.
+
+    An entry records its draft's tags (`entry["tags"]`) so the next run can avoid them:
+    thirteen tags that the shop's other listings already carry make the listings compete
+    with each other. An entry written before tags were recorded has none and is skipped.
+    """
+    out: list[list[str]] = []
+    for entry in history.values():
+        tags = entry.get("tags") if isinstance(entry, dict) else None
+        if isinstance(tags, list):
+            cleaned = [t for t in tags if isinstance(t, str) and t.strip()]
+            if cleaned:
+                out.append(cleaned)
+    return out
+
+
 def known_products(history: dict, names: set[str]) -> tuple[list[str], list[str]]:
     """(already done, needs review) among the entries whose product is still in the folder.
 
@@ -514,7 +531,8 @@ def run(workspace: Workspace, template: Template, *, client: EtsyClient | None =
         names = {p.name.casefold() for p, _ in workspace.product_groups()}
         report.already_done, report.needs_review = known_products(history, names)
         prepared = pipeline.run(workspace, template, client=client, exclude_products=set(history),
-                                mockups=mockups, watermark=watermark)
+                                mockups=mockups, watermark=watermark,
+                                avoid_tags=used_tags(history))
         report.prepared = prepared
         if prepared.skipped:
             details = "; ".join(f"{row.source.name}: {', '.join(row.warnings)}" for row in prepared.skipped)
@@ -562,7 +580,8 @@ def run(workspace: Workspace, template: Template, *, client: EtsyClient | None =
         # the number is set to the product's real line in review.csv instead.
         for line, (product, row) in enumerate(zip(prepared.ready, rows), start=2):
             entry = {"status": "pending", "listing_id": None, "images_uploaded": 0,
-                     "files_uploaded": 0, "review_csv": str(prepared.csv_path)}
+                     "files_uploaded": 0, "review_csv": str(prepared.csv_path),
+                     "tags": list(product.tags)}
             # Which pictures are the shop's info images, by the file names sent (the
             # names entry["images"] records too).
             info_names = [Path(p).name for p in product.images if image_key(p) in info_keys]

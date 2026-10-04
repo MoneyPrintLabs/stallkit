@@ -1168,3 +1168,24 @@ def test_the_pipeline_tells_the_copy_what_the_product_is(tmp_path, monkeypatch):
     pipeline.run(ws, capture(LISTING), client=_FakeClient(), mockups_per_product=1)
     assert seen["template_title"] == "Handmade Ceramic Mug"
     assert pipeline.title_problems("Salt & Pepper & Co") and pipeline.TITLE_ONCE["&"] == "and"
+
+
+def test_a_batch_avoids_the_tags_of_its_earlier_rows_and_of_the_history(tmp_path, monkeypatch):
+    monkeypatch.setenv("STALLKIT_HOME", str(tmp_path / "home"))
+    names = ["black-cat-magic.png", "black-cat-moon.png", "black-cat-garden.png"]
+    ws = _workspace_with(tmp_path, names)
+
+    plain = pipeline.run(ws, capture(LISTING), client=_FakeClient(), mockups_per_product=1)
+    tags = [row.tags for row in plain.ready]
+    assert len(tags) == 3 and all(len(t) == MAX_TAGS for t in tags)
+    for a in range(3):
+        for b in range(a):
+            assert len(set(tags[a]) & set(tags[b])) < 7
+
+    # The history's tags count as earlier rows too: a design drafted last week is avoided.
+    last_week = ["black cat magic", "black cat moon", "black cat garden"] + tags[0][:6]
+    again = pipeline.run(ws, capture(LISTING), client=_FakeClient(), mockups_per_product=1,
+                         avoid_tags=[last_week])
+    for row in again.ready:
+        assert len(set(row.tags) & set(last_week)) < 7
+    assert again.ready[0].tags != tags[0], "the six tags of last week's draft were avoided"

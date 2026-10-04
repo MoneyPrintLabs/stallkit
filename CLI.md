@@ -514,6 +514,32 @@ fractions of that mockup:
 A mockup with no entry uses the default, `0.30,0.26,0.40,0.36`. Rename a mockup and its
 entry stops applying; `stallkit drop calibrate` says so rather than letting you wonder.
 
+The editor in **Mockuplar** can add three optional keys, and you can too:
+
+```json
+{
+  "poster-wall.jpg": {
+    "x": 0.31, "y": 0.2, "w": 0.37, "h": 0.68,
+    "quad": [[0.31, 0.2], [0.68, 0.26], [0.67, 0.82], [0.32, 0.88]],
+    "realism": 20
+  },
+  "mug-white.jpg": { "x": 0.33, "y": 0.3, "w": 0.3, "h": 0.48, "curve": 70 }
+}
+```
+
+- `quad`: four corners, top-left, top-right, bottom-right, bottom-left, for a print
+  surface seen at an angle; the design is placed in perspective. `x`, `y`, `w`, `h` are
+  then the corners' bounding box. Corners that make a dent, a twist or a flattened
+  corner are ignored and the box is used.
+- `realism` (0-100): how much of the mockup's own light, folds and fabric texture the
+  design takes. Without it, the mockup type decides (65 for T-shirts, 15 for posters ...).
+- `curve` (0-100): wraps the design round a mug, tumbler or bottle. Without it, 55 for
+  mugs and 0 for everything else.
+
+`0` for both renders exactly what a plain rectangle always did. `--area` moves the print
+but keeps a mockup's `realism` and `curve`; a same-size mockup that only borrows another's
+area keeps its own type's.
+
 Two things it will tell you rather than hide:
 
 - **A filename it cannot read is skipped, not guessed.** `mountain-sunset.png` gives a
@@ -591,8 +617,15 @@ documented limits plus how its search surface actually behaves:
 - **Tags** — unused slots out of 13, over-length tags, exact duplicates, near-duplicates
   that burn two slots on one query (`gift` / `gifts`), too many single-word tags,
   and tags sharing no word with the title.
+- **Across your listings** — a listing that shares 7 or more of its tags with another
+  one (the other listing's id is in the message; 7-8 shared is a note, 9 or more a
+  warning) and a listing whose tags are mostly the ones on at least half of your
+  listings (5 or more is a note, more than half of its tags a warning). Both are
+  worked out from the listings already read, with no extra Etsy call.
 - **Titles** — length, keyword buried past the ~40-character truncation point,
-  repeated words, comma chains, shouting.
+  repeated words, comma chains, shouting, and a title that does not open with its
+  design ("Kitchen Wallpaper | Peel and Stick | ...": the first phrase holds only
+  room, product and material words).
 - **Descriptions** — thin content, and openings that repeat none of the title keywords
   (that first paragraph is the snippet Google shows).
 - **Housekeeping** — missing materials, auto-renew off, expired listings.
@@ -623,6 +656,10 @@ stallkit seo suggest 1234567890
 
 Audits that listing, then researches its own keyword and lists tags used by ranking
 competitors that you are not using yet, with the share of ranking listings that use each.
+The suggestions follow the same rules as the tags of a new draft: no near-duplicate of a
+tag you have, no "removable" or "self adhesive" unless your listing says so (and not at
+all if it also sells paste-up paper), and no more of the generic tags than a listing can
+afford.
 
 Add tags only if they honestly describe your item. Irrelevant tags pull in traffic that
 does not convert, and Etsy weights conversion heavily.

@@ -1,3 +1,24 @@
+**0.3.3 makes your mockups look real.** The design now takes the mockup's own light, folds
+and fabric texture (**Gerçekçilik**), can be placed on four corners for angled frames and
+walls (**4 köşe**), and wraps around mugs (**Kavis**). Set them per mockup in **Mockuplar**;
+existing mockups keep working, and with the sliders at 0 the result is exactly what 0.3.2 made.
+
+**Better titles and tags.** New drafts now lead with the design's own phrase, keep shop-wide
+tags to three, vary tags from draft to draft, and no longer write "removable" or "self
+adhesive" when you also sell paste-up paper. **SEO** also flags listings that share most of
+their tags with another listing.
+
+**0.3.3 mockup'larınızı gerçek gösterir.** Tasarım artık mockup'ın ışığını, kıvrımlarını ve
+kumaş dokusunu alıyor (**Gerçekçilik**), eğik duran çerçeve ve duvarlar için dört köşeden
+yerleştirilebiliyor (**4 köşe**) ve kupanın etrafına sarılıyor (**Kavis**). **Mockuplar**'da
+her mockup için ayarlanır; eski mockup'lar çalışmaya devam eder, ayarlar 0'dayken sonuç
+0.3.2'dekiyle birebir aynıdır.
+
+**Daha iyi başlık ve etiketler.** Yeni taslaklar tasarımın kendi ifadesiyle başlıyor, bütün
+mağazada tekrar eden etiketleri üçle sınırlıyor, etiketleri taslaktan taslağa değiştiriyor ve
+yapışkansız kağıt da satıyorsan artık "removable" ya da "self adhesive" yazmıyor. **SEO** sayfası
+etiketlerinin çoğunu başka bir ilanla paylaşan ilanları da işaretliyor.
+
 **0.3.2 looks and works like the video, and adds what sellers asked for.**
 
 - **Watermark:** upload your own mark on **Mockuplar**; choose position (centre, corner or

@@ -29,7 +29,7 @@ import math
 import re
 import threading
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -506,8 +506,9 @@ def effective_areas(
 ) -> dict[str, tuple[mockup.PrintArea, str]]:
     """(area, source) for every mockup, decided exactly as `pipeline.run` decides it.
 
-    source is "own" (its positions.json entry), "same_size" (borrowed from the first
-    calibrated mockup, by name, with identical pixel dimensions) or "default".
+    source is "own" (its positions.json entry), "same_size" (the place of the first
+    calibrated mockup, by name, with identical pixel dimensions; its realism and curve are
+    not borrowed) or "default".
     """
     available = ws.mockup_files()
     positions = mockup.load_positions(ws.positions_path)
@@ -525,10 +526,21 @@ def effective_areas(
             continue
         borrowed = by_size.get(sizes.get(path.name, (0, 0)))
         if borrowed is not None:
-            out[path.name] = (borrowed, SOURCE_SAME_SIZE)
+            # Where the print goes, not how it looks: a same-size mockup can be another
+            # product (a square mug shot beside a square tee), so its realism and curve
+            # stay its own type's until a same-size save copies them on purpose.
+            out[path.name] = (borrowed.geometry(), SOURCE_SAME_SIZE)
         else:
             out[path.name] = (mockup.DEFAULT_PRINT_AREA, SOURCE_DEFAULT)
     return out
+
+
+def kind_of(infos: dict[str, MockupInfo] | None, name: str) -> str:
+    """The mockup type compositing uses for `name`: its catalog type (`load`), else the
+    guess from its file name. It picks the realism and curve an area without its own
+    gets (`mockup.styled`)."""
+    facts = (infos or {}).get(name)
+    return facts.type if facts is not None else guess(name)[0]
 
 
 def effective_area(ws: Workspace, name: str) -> tuple[mockup.PrintArea, str]:
@@ -561,9 +573,15 @@ def save_area(
     same_size: bool = False,
     dry_run: bool = False,
     sizes: dict[str, tuple[int, int]] | None = None,
+    keep_style: bool = False,
 ) -> list[str]:
-    """Give `name` (and, with same_size, every mockup of its size) the print area.
+    """Give `name` (and, with same_size, every mockup of its size) the print area,
+    its corners, realism and curve included.
 
+    keep_style: change only where the print goes; each target keeps the realism and
+    curve it had (the CLI's --area, which has no say in them). Without it, a realism or
+    curve that `area` leaves on None still keeps another mockup's own value (the editor
+    sends None for a slider the seller did not touch).
     Returns the names that were — or with dry_run, would be — changed.
     """
     _mockup_path(ws, name)
@@ -579,7 +597,19 @@ def save_area(
     with _LOCK:
         positions = mockup.load_positions(ws.positions_path)
         for target in targets:
-            positions[target] = area
+            old = positions.get(target)
+            if keep_style and old is not None:
+                positions[target] = replace(area, realism=old.realism, curve=old.curve)
+            elif target != name and old is not None:
+                # A realism or curve left on the default (None) is not a setting, so a
+                # sibling keeps its own instead of being reset to its type's default.
+                positions[target] = replace(
+                    area,
+                    realism=old.realism if area.realism is None else area.realism,
+                    curve=old.curve if area.curve is None else area.curve,
+                )
+            else:
+                positions[target] = area
         mockup.save_positions(ws.positions_path, positions)
     return targets
 

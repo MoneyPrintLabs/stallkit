@@ -570,6 +570,7 @@ def run(
     mockups: Sequence[Path] | None = None,
     watermark: bool = True,
     info_images: Sequence[infoimages.InfoImage] | None = None,
+    avoid_tags: Sequence[Sequence[str]] = (),
 ) -> DropReport:
     """Composite, research, write copy, and emit review.csv. Nothing is sent to Etsy.
 
@@ -587,6 +588,10 @@ def run(
     `info_images` end every row's images, after its own (default: the workspace's,
     drop.infoimages); a product folder gets the ones that fit (`infoimages.fitting`).
     They are never watermarked.
+
+    `avoid_tags` are the tags of drafts made before this run (the upload history's,
+    `automation.used_tags`); each row also avoids the tags of the rows before it, so a
+    batch of designs does not end up with one set of thirteen tags (`generate.build_tags`).
     """
     workspace.require()
     # download / both: every row also carries the files a buyer downloads.
@@ -650,21 +655,18 @@ def run(
     for note in info_notes:
         say(note)
 
-    positions = mockup.load_positions(workspace.positions_path)
     # One calibration covers every mockup of the same size — that is the point of
     # storing fractions. A mockup with no entry of its own borrows the area of a
-    # calibrated one with identical dimensions before falling back to the default.
-    sizes = mockup.mockup_sizes(available)
-    by_size: dict[tuple[int, int], mockup.PrintArea] = {}
-    for name in sorted(positions):
-        if name in sizes:
-            by_size.setdefault(sizes[name], positions[name])
+    # calibrated one with identical dimensions before falling back to the default:
+    # catalog.effective_areas, the rule the app's runs and the Mockuplar page use too.
+    areas = catalog.effective_areas(workspace)
+    try:
+        mockup_facts = catalog.load(workspace)
+    except (OSError, ValueError):
+        mockup_facts = {}
 
     def area_for(template_image: Path) -> mockup.PrintArea:
-        own = positions.get(template_image.name)
-        if own is not None:
-            return own
-        return by_size.get(sizes.get(template_image.name, (0, 0)), mockup.DEFAULT_PRINT_AREA)
+        return areas.get(template_image.name, (mockup.DEFAULT_PRINT_AREA, ""))[0]
 
     # The folder name is a useful fallback for `2-PRODUCTS/mountain sunset/IMG_01.png`,
     # but never for a file sitting directly in 2-PRODUCTS — that would turn the
@@ -686,7 +688,10 @@ def run(
     report.concepts = len(grouped)
     # What the template says the product is (generate.hint_from): the market search
     # names it too, so "dog dad paw print" on a shirt template searches shirts.
-    hint = generate.hint_from(template.source_title, template.tags, template.description)
+    hint = generate.hint_from(template.source_title, template.tags, template.description,
+                              template.materials)
+    # The tags of every draft before this one, the history's first, then this run's.
+    earlier_tags: list[list[str]] = [list(tags) for tags in avoid_tags]
 
     # Output names are handed out from one set per batch, so a collision between two
     # products is resolved rather than discovered later as a missing image.
@@ -755,8 +760,11 @@ def run(
             # The seller's description template, when saved (drop.description).
             description_template=template.description_template,
             product_words=template.category_path,
+            template_materials=template.materials,
+            taken_tags=earlier_tags,
         )
         row.title, row.tags = clean_title(copy.title), copy.tags
+        earlier_tags.append(list(copy.tags))
         row.description = copy.description
         row.evidence, row.warnings = copy.sources, list(copy.warnings)
         if digital and to_order and not row.files:
@@ -800,9 +808,10 @@ def run(
                 area = area_for(template_image)
                 out = report.out_dir / _output_name(row.source, template_image, taken)
                 try:
-                    row.images.append(
-                        mockup.compose(row.source, template_image, out, area=area)
-                    )
+                    row.images.append(mockup.compose(
+                        row.source, template_image, out, area=area,
+                        kind=catalog.kind_of(mockup_facts, template_image.name),
+                    ))
                 except Exception as exc:  # noqa: BLE001 — one bad file must not stop a batch
                     row.warnings.append(f"mockup {template_image.name} failed: {exc}")
             if include_flat:

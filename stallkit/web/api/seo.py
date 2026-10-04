@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from ... import seo
 from ...config import MAX_MATERIAL_LEN, MAX_MATERIALS, MAX_TAG_LEN, MAX_TAGS, MAX_TITLE_LEN
 from ...drop import cache as research_cache
+from ...drop import generate
 from ...errors import EtsyApiError
 from ...listings import bad_tag_chars, build_payload, validate_tags
 from ...listings import title_problems as listings_title_problems
@@ -162,6 +163,33 @@ def _cached_listing(ctx: AppContext, listing_id: int) -> dict[str, Any] | None:
     return None
 
 
+def _state_listings(ctx: AppContext, listing_id: int) -> list[dict[str, Any]]:
+    """The cached list this listing is in (its state's), or [] when it is in none."""
+    store = _store(ctx)
+    with store.lock:
+        entries = [e for (shop, _state), e in store.entries.items() if shop == ctx.shop_id]
+    for entry in entries:
+        if any(_listing_id(listing) == listing_id for listing in entry["listings"]):
+            return list(entry["listings"])
+    return []
+
+
+def _shop_tags(ctx: AppContext, listing_id: int) -> list[list[str]]:
+    """The tags of the shop's other cached listings (every state, each once)."""
+    store = _store(ctx)
+    with store.lock:
+        entries = [e for (shop, _state), e in store.entries.items() if shop == ctx.shop_id]
+    seen: set[int] = set()
+    out: list[list[str]] = []
+    for entry in entries:
+        for listing in entry["listings"]:
+            other = _listing_id(listing)
+            if other and other != listing_id and other not in seen:
+                seen.add(other)
+                out.append(_tags(listing))
+    return out
+
+
 def _replace_cached(ctx: AppContext, listing: dict[str, Any]) -> None:
     listing_id = _listing_id(listing)
     store = _store(ctx)
@@ -252,6 +280,10 @@ def issue_params(code: str, listing: dict[str, Any]) -> dict[str, Any]:
         return {"orphans": len(orphans), "tags_used": len(tags)}
     if code == "description.thin":
         return {"description_len": len(description), "min": seo.DESCRIPTION_MIN_USEFUL}
+    if code == "title.generic_opening":
+        opening = seo.generic_opening(title)
+        return {"visible": seo.TITLE_VISIBLE_CHARS, "lead": opening[1] if opening else "",
+                "level": opening[0] if opening else ""}
     return {}
 
 
@@ -367,8 +399,8 @@ def proposal(listing: dict[str, Any], codes: set[str]) -> dict[str, Any]:
     manual = [
         code for code in (
             "title.missing", "title.too_short", "title.too_long", "title.front_empty",
-            "title.caps", "title.comma_spam", "description.missing", "description.thin",
-            "description.opening",
+            "title.caps", "title.comma_spam", "title.generic_opening", "tags.shared",
+            "tags.generic", "description.missing", "description.thin", "description.opening",
         ) if code in codes
     ]
     if "title.repetition" in codes:
@@ -409,8 +441,10 @@ def _thumb(listing: dict[str, Any]) -> str | None:
     return first.get("url_170x135") or first.get("url_75x75") or first.get("url_570xN")
 
 
-def audit_item(listing: dict[str, Any]) -> dict[str, Any]:
-    result = seo.audit_listing(listing)
+def audit_item(listing: dict[str, Any], shop: seo.ShopAudit | None = None) -> dict[str, Any]:
+    """One listing as the page gets it. With `shop` (seo.audit_shop over the same list of
+    listings) the audit also checks its tags against the other listings'."""
+    result = seo.audit_listing(listing, shop)
     issues = _sorted_issues(result.issues)
     codes = {i.code for i in issues}
     serious = any(i.severity in ("error", "warn") for i in issues)
@@ -423,7 +457,8 @@ def audit_item(listing: dict[str, Any]) -> dict[str, Any]:
         "grade": result.grade,
         "ready": result.score >= READY_SCORE and not serious,
         "issues": [
-            {"code": i.code, "severity": i.severity, "params": issue_params(i.code, listing)}
+            {"code": i.code, "severity": i.severity,
+             "params": {**issue_params(i.code, listing), **i.params}}
             for i in issues
         ],
         "tags": _tags(listing),
@@ -471,9 +506,9 @@ def audit(req: Request) -> dict[str, Any]:
     state = _state(req)
     data = _load(ctx, state, refresh=req.bool_query("refresh"))
     listings = data["listings"]
-    items = [audit_item(listing) for listing in listings]
-    items.sort(key=lambda item: (item["score"], item["title"].lower(), item["listing_id"]))
     shop = seo.audit_shop(listings)
+    items = [audit_item(listing, shop) for listing in listings]
+    items.sort(key=lambda item: (item["score"], item["title"].lower(), item["listing_id"]))
     scanned = len(items)
     if not data["cached"]:
         _note_suggestions(ctx, state, items)
@@ -528,6 +563,7 @@ def research(req: Request) -> dict[str, Any]:
     listing_id = req.int_query("listing_id", None, min=1)
     client = ctx.client(require_auth=False)  # a public search: the API key is enough
     existing: list[str] | None = None
+    listing: dict[str, Any] | None = None
     if listing_id is not None:
         listing = _cached_listing(ctx, listing_id)
         if listing is None and client.token is not None:
@@ -541,8 +577,17 @@ def research(req: Request) -> dict[str, Any]:
             existing = _tags(listing)
     report, cached = market(client, keyword, refresh=req.bool_query("refresh"))
     have = {seo.tag_key(t) for t in (existing or [])}
+    ranked: list[tuple[str, int]] | None = None
+    if listing is not None:
+        # The listing's own: what the draft builder follows (generate.suggest_additions),
+        # so a suggestion never repeats the shop's generic tags, near-duplicates a tag the
+        # listing has, or claims what it does not.
+        ranked = _suggestions(ctx, listing, report)
+        source = ranked
+    else:
+        source = [(str(tag), int(count)) for tag, count in report.tags]
     rows = []
-    for tag, count in report.tags:
+    for tag, count in source:
         tag = str(tag)
         if tag in have or len(tag) > MAX_TAG_LEN or bad_tag_chars(tag):
             continue
@@ -550,7 +595,10 @@ def research(req: Request) -> dict[str, Any]:
         rows.append({"tag": tag, "count": int(count), "share": round(share, 4)})
         if len(rows) >= RESEARCH_ROWS:
             break
-    suggestions = seo.suggest_tags(report, existing=existing or [], extra=RESEARCH_ROWS)
+    suggestions = seo.suggest_tags(
+        report, existing=existing or [], extra=RESEARCH_ROWS,
+        candidates=[tag for tag, _count in ranked] if ranked is not None else None,
+    )
     allowed = {row["tag"] for row in rows}
     return {
         "keyword": keyword,
@@ -564,6 +612,28 @@ def research(req: Request) -> dict[str, Any]:
         "used_slots": suggestions.used_slots,
         "cached": cached,
     }
+
+
+def _suggestions(ctx: AppContext, listing: dict[str, Any],
+                 report: seo.MarketReport) -> list[tuple[str, int]]:
+    """The market's tags worth adding to this listing, by the draft builder's rules.
+
+    Its own words say which claims it makes (generate.hint_from); the shop's other
+    cached listings say which tags are the shop's generic ones (on at least half of
+    them, `ShopAudit.generic_tags`) and which a tag would share with another listing.
+    """
+    listing_id = _listing_id(listing)
+    peers = _state_listings(ctx, listing_id)
+    shop = seo.audit_shop(peers) if peers else None
+    wide = list(shop.generic_tags) if shop is not None else []
+    text = generate.hint_from(
+        str(listing.get("title") or ""), _tags(listing), str(listing.get("description") or ""),
+        [str(m) for m in (listing.get("materials") or []) if m],
+    )
+    return generate.suggest_additions(
+        report, existing=_tags(listing), text=text, title=str(listing.get("title") or ""),
+        shop=_shop_tags(ctx, listing_id), wide=wide,
+    )
 
 
 def _clean_list(value: Any, field: str) -> list[str]:
@@ -643,17 +713,24 @@ def fix(req: Request) -> dict[str, Any]:
                 409, "seo_stale",
                 "The listing changed on Etsy after the audit. Rescan and review the fix again.",
             )
+    # The shop as it was (for the score before) and as it is once this tag list is on it.
+    shop_before = _shop_audit(_state_listings(ctx, listing_id))
     updated = client.update_listing(listing_id, payload)
     listing = {**(before or {}), **(updated if isinstance(updated, dict) else {})}
     listing.setdefault("listing_id", listing_id)
     _replace_cached(ctx, listing)
     ctx.changed("listings", source="seo")  # the listings table, the dashboard, ...
-    item = audit_item(listing)
+    item = audit_item(listing, _shop_audit(_state_listings(ctx, listing_id)))
     return {
         "item": item,
-        "before": seo.audit_listing(before).score if before else None,
+        "before": seo.audit_listing(before, shop_before).score if before else None,
         "sent": sorted(payload),
     }
+
+
+def _shop_audit(listings: list[dict[str, Any]]) -> seo.ShopAudit | None:
+    """seo.audit_shop over a cached list of listings; None when there is none."""
+    return seo.audit_shop(listings) if listings else None
 
 
 def export_csv(req: Request) -> Response:
@@ -662,7 +739,8 @@ def export_csv(req: Request) -> Response:
     assert ctx is not None
     state = _state(req)
     data = _load(ctx, state, refresh=req.bool_query("refresh"))
-    audits = sorted((seo.audit_listing(listing) for listing in data["listings"]),
+    shop = seo.audit_shop(data["listings"])
+    audits = sorted((seo.audit_listing(listing, shop) for listing in data["listings"]),
                     key=lambda a: a.score)
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS, lineterminator="\r\n")

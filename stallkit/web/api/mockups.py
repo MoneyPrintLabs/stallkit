@@ -460,8 +460,17 @@ def delete_mockup(req: Request) -> dict[str, Any]:
 
 
 def _area_payload(ws: Workspace, name: str) -> dict[str, Any]:
+    """The editor's view of one mockup's print area.
+
+    "area" is what is stored or borrowed (x/y/w/h, plus quad/realism/curve when set);
+    "style" is what a render uses: realism and curve with the type defaults filled in,
+    the defaults themselves, and whether the curve is offered for this type.
+    """
     item = _item(ws, name)
     siblings = catalog.same_size_names(ws, name)
+    area, _source = catalog.effective_area(ws, name)
+    kind = item["type"]
+    used = mockup.styled(area, kind)
     return {
         "name": name,
         "width": item["width"],
@@ -470,6 +479,14 @@ def _area_payload(ws: Workspace, name: str) -> dict[str, Any]:
         "source": item["area_source"],
         "default_area": mockup.DEFAULT_PRINT_AREA.to_dict(),
         "same_size": [n for n in siblings if n != name],
+        "style": {
+            "kind": kind,
+            "realism": used.realism,
+            "curve": used.curve,
+            "realism_default": mockup.REALISM_DEFAULTS.get(kind, 0),
+            "curve_default": mockup.CURVE_DEFAULTS.get(kind, 0),
+            "curve_offered": kind in mockup.CURVE_TYPES or bool(used.curve),
+        },
     }
 
 
@@ -492,8 +509,55 @@ def _number(value: Any, field: str) -> float:
     return number
 
 
-def _area(values: dict[str, Any]) -> mockup.PrintArea:
-    """A PrintArea from x, y, w, h fractions (422 invalid when they do not make one)."""
+def _level(value: Any, field: str) -> int | None:
+    """A 0-100 setting (realism, curve): None when absent or null (the type default)."""
+    if value is None or value == "":
+        return None
+    number = _number(value, field)
+    if not 0 <= number <= 100:
+        raise ApiError(422, "invalid", f"{field} must be between 0 and 100", field=field)
+    return int(round(number))
+
+
+def _quad(raw: Any) -> list[list[float]]:
+    """Four [x, y] corners from a JSON list, or from a query's eight comma-separated numbers."""
+    if isinstance(raw, str):
+        parts = [part for part in raw.split(",") if part.strip()]
+        if len(parts) != 8:
+            raise ApiError(422, "invalid", "quad must be four x,y corners", field="quad")
+        numbers = [_number(part.strip(), "quad") for part in parts]
+        return [[numbers[i], numbers[i + 1]] for i in range(0, 8, 2)]
+    if not isinstance(raw, list) or len(raw) != 4:
+        raise ApiError(422, "invalid", "quad must be four [x, y] corners", field="quad")
+    corners = []
+    for point in raw:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            raise ApiError(422, "invalid", "quad must be four [x, y] corners", field="quad")
+        corners.append([_number(point[0], "quad"), _number(point[1], "quad")])
+    return corners
+
+
+def _area(values: Any, *, style_from: mockup.PrintArea | None = None) -> mockup.PrintArea:
+    """A PrintArea from x, y, w, h fractions - or four corners in "quad" - with its
+    realism and curve (422 invalid when they do not make one).
+
+    A realism or curve that is not given comes from `style_from` (the saved area a
+    preview starts from); without one it is None, the mockup type's default.
+    """
+    if "realism" in values:
+        realism = _level(values.get("realism"), "realism")
+    else:
+        realism = style_from.realism if style_from is not None else None
+    if "curve" in values:
+        curve = _level(values.get("curve"), "curve")
+    else:
+        curve = style_from.curve if style_from is not None else None
+    if values.get("quad") not in (None, ""):
+        corners = [[round(v, 5) for v in point] for point in _quad(values.get("quad"))]
+        try:
+            return mockup.PrintArea.from_quad(corners, realism=realism, curve=curve)
+        except ValidationError as exc:
+            raise ApiError(422, "bad_area", str(exc)) from exc
     x, y, w, h = (_number(values.get(k), k) for k in ("x", "y", "w", "h"))
     x, y, w, h = (round(v, 5) for v in (x, y, w, h))
     # Rounding may push the far edge a hair past 1; pull it back rather than refuse.
@@ -502,13 +566,18 @@ def _area(values: dict[str, Any]) -> mockup.PrintArea:
     if 1.0 < y + h <= 1.0001:
         h = round(1.0 - y, 5)
     try:
-        return mockup.PrintArea(x, y, w, h)
+        return mockup.PrintArea(x, y, w, h, realism=realism, curve=curve)
     except ValidationError as exc:
         raise ApiError(422, "bad_area", str(exc)) from exc
 
 
 def save_area(req: Request) -> dict[str, Any]:
-    """POST /api/mockups/{name}/area {x, y, w, h, same_size} -> {applied_to: [names]}."""
+    """POST /api/mockups/{name}/area -> {applied_to: [names]}.
+
+    Body: {x, y, w, h} or {quad: [[x, y] x4]} (top-left, top-right, bottom-right,
+    bottom-left), optional realism and curve (0-100, null for the type default), and
+    same_size, which gives every mockup of this size all of it.
+    """
     ws = _ws(req)
     name = req.params["name"]
     _mockup_file(ws, name)
@@ -572,24 +641,30 @@ def design_image(req: Request) -> Response:
 def mockup_preview(req: Request) -> Response:
     """GET /api/mockups/{name}/preview?design=&x=&y=&w=&h=&max=: a real composite.
 
-    `mockup.compose` places the design into the rectangle exactly as the drafts do
-    (ratio kept, centred). Both inputs are the cached screen-sized copies, so a
-    preview takes a few milliseconds instead of a full-resolution render.
+    `quad=` (eight numbers: four x,y corners) in place of x/y/w/h gives four corners;
+    `realism=` and `curve=` (0-100) override the saved ones. `mockup.compose` places
+    the design exactly as the drafts do (ratio kept, centred, the mockup type's
+    realism and curve). Both inputs are the cached screen-sized copies, so a preview
+    takes a fraction of a full-resolution render.
     """
     ws = _ws(req)
     name = req.params["name"]
     path = _mockup_file(ws, name)
-    if any(k in req.query for k in ("x", "y", "w", "h")):
-        area = _area(req.query)
+    saved = catalog.effective_area(ws, name)[0]
+    if any(k in req.query for k in ("x", "y", "w", "h", "quad")):
+        area = _area(req.query, style_from=saved)
+    elif any(k in req.query for k in ("realism", "curve")):
+        area = _area({**saved.to_dict(), **dict(req.query)}, style_from=saved)
     else:
-        area = catalog.effective_area(ws, name)[0]
+        area = saved
     max_edge = req.int_query("max", IMAGE_MAX_DEFAULT, min=200, max=2000) or IMAGE_MAX_DEFAULT
     source = _design_path(ws, req.query.get("design", SAMPLE))
     base = display_image(path, max_edge)
     art = design_png(source, max_edge)
     out = _cache_dir() / f"preview-{threading.get_ident()}.jpg"
+    kind = catalog.kind_of(catalog.load(ws), name)
     try:
-        mockup.compose(art, base, out, area=area, min_edge=0)
+        mockup.compose(art, base, out, area=area, min_edge=0, kind=kind)
         data = out.read_bytes()
     finally:
         try:

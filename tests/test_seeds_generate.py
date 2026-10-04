@@ -569,7 +569,12 @@ def test_a_draft_without_market_data_gets_no_tags_of_the_template_design():
     result = generate.generate(seed, None, template_title=_TEMPLATE_TITLE,
                                fallback_tags=_TEMPLATE_TAGS)
     assert not {"retro mountain sun", "mountain gift", "hiking gift"} & set(result.tags)
-    assert "graphic tee" in result.tags and "comfort colors" in result.tags
+    # The template's own tags that suit any design are the shop-wide ones, and a draft takes
+    # at most GENERIC_SLOTS of them: the rest of its thirteen are about this design.
+    shop_wide = set(generate.product_tags(_TEMPLATE_TAGS, _TEMPLATE_TITLE, seed))
+    assert "graphic tee" in result.tags
+    assert len(shop_wide & set(result.tags)) == generate.GENERIC_SLOTS
+    assert len(result.tags) == MAX_TAGS
     assert "your template listing's tags" in result.sources
     assert validate_tags(result.tags) == []
 
