@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-10-04
+
 ### Changed
 - **Titles and tags of new drafts.** Found on a real shop's audit: 44% of its tag slots
   were the same dozen shop-wide tags, so its listings competed with each other, and its
@@ -63,8 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in Turkish and English), its CSV report and `stallkit seo audit` use all three; the
   listings table and the dashboard still score each listing alone, so they show the opening
   check but not the two across-listings ones.
-
-## [0.3.3] — 2026-10-02
 
 ### Added
 - **Realistic mockups.** A design no longer sits flat on top of the photo:
