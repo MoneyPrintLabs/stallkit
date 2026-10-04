@@ -899,3 +899,25 @@ def test_research_cache_keys_are_the_search_as_the_seo_page_writes_them():
     found, cached = pipeline._research_concept(None, "Dog  Dad Paw Print Shirt", sample=200,
                                                use_cache=True)
     assert cached and found.keyword == "dog dad paw print shirt"
+
+
+def test_the_history_records_each_drafts_tags_and_the_next_batch_avoids_them(studio, monkeypatch):
+    ws, template = studio
+    client = Client(ws)
+    first = automation.run(ws, template, client=client)
+    entry = json.loads((ws.root / "upload-history.json").read_text())["123"]["mountain sunset shirt"]
+    assert entry["status"] == "ok" and entry["tags"] == first.prepared.ready[0].tags != []
+
+    second = ws.products / "mountain sunset shirt 2"
+    second.mkdir()
+    Image.new("RGBA", (20, 20), (20, 30, 40, 100)).save(second / "1-front.png")
+    seen = []
+    real = pipeline.run
+
+    def watching(*args, **kwargs):
+        seen.append(kwargs.get("avoid_tags"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "run", watching)
+    automation.run(ws, template, dry_run=True)  # reads the same history, sends nothing
+    assert seen == [[entry["tags"]]]

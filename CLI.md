@@ -617,8 +617,15 @@ documented limits plus how its search surface actually behaves:
 - **Tags** — unused slots out of 13, over-length tags, exact duplicates, near-duplicates
   that burn two slots on one query (`gift` / `gifts`), too many single-word tags,
   and tags sharing no word with the title.
+- **Across your listings** — a listing that shares 7 or more of its tags with another
+  one (the other listing's id is in the message; 7-8 shared is a note, 9 or more a
+  warning) and a listing whose tags are mostly the ones on at least half of your
+  listings (5 or more is a note, more than half of its tags a warning). Both are
+  worked out from the listings already read, with no extra Etsy call.
 - **Titles** — length, keyword buried past the ~40-character truncation point,
-  repeated words, comma chains, shouting.
+  repeated words, comma chains, shouting, and a title that does not open with its
+  design ("Kitchen Wallpaper | Peel and Stick | ...": the first phrase holds only
+  room, product and material words).
 - **Descriptions** — thin content, and openings that repeat none of the title keywords
   (that first paragraph is the snippet Google shows).
 - **Housekeeping** — missing materials, auto-renew off, expired listings.
@@ -649,6 +656,10 @@ stallkit seo suggest 1234567890
 
 Audits that listing, then researches its own keyword and lists tags used by ranking
 competitors that you are not using yet, with the share of ranking listings that use each.
+The suggestions follow the same rules as the tags of a new draft: no near-duplicate of a
+tag you have, no "removable" or "self adhesive" unless your listing says so (and not at
+all if it also sells paste-up paper), and no more of the generic tags than a listing can
+afford.
 
 Add tags only if they honestly describe your item. Irrelevant tags pull in traffic that
 does not convert, and Etsy weights conversion heavily.

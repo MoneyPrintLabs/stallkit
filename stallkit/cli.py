@@ -26,6 +26,7 @@ from .config import Config, home_dir, split_credential, token_path, write_env_fi
 from .drop import automation, pipeline
 from .drop import catalog as catalog_mod
 from .drop import description as description_mod
+from .drop import generate as generate_mod
 from .drop import infoimages as infoimages_mod
 from .drop import mockup as mockup_mod
 from .drop import template as template_mod
@@ -965,8 +966,10 @@ def seo_audit(
         _warn(f"No {state} listings to audit.")
         raise typer.Exit(1)
 
-    audits = [seo_mod.audit_listing(listing) for listing in listings]
+    # The shop first: two of the checks (tags shared with another listing, a tag list of
+    # the shop's generic tags) compare each listing with the others.
     shop = seo_mod.audit_shop(listings)
+    audits = [seo_mod.audit_listing(listing, shop) for listing in listings]
 
     audits.sort(key=lambda a: a.score)
     average = sum(a.score for a in audits) / len(audits)
@@ -1176,7 +1179,19 @@ def seo_suggest(
         _warn(f"No market data for {term!r}.")
         return
 
-    suggestions = seo_mod.suggest_tags(report, existing=listing.get("tags") or [])
+    # The draft builder's rules: no near-duplicate of a tag the listing has, no adhesive
+    # claim ("removable") the listing does not make, and no more of the generic tags than
+    # a listing can afford.
+    chosen = generate_mod.suggest_additions(
+        report, existing=listing.get("tags") or [], title=listing.get("title") or "",
+        text=generate_mod.hint_from(
+            listing.get("title") or "", listing.get("tags") or [],
+            listing.get("description") or "", listing.get("materials") or [],
+        ),
+    )
+    suggestions = seo_mod.suggest_tags(
+        report, existing=listing.get("tags") or [], candidates=[tag for tag, _n in chosen]
+    )
 
     def _line(tag: str) -> str:
         count = next((c for t, c in report.tags if t == tag), 0)

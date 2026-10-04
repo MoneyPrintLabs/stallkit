@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Titles and tags of new drafts.** Found on a real shop's audit: 44% of its tag slots
+  were the same dozen shop-wide tags, so its listings competed with each other, and its
+  titles opened with a generic room phrase and promised "removable, self adhesive" for a
+  product that also comes as paste-up paper. The generator now works like this:
+  - **Title**: the design's own phrase leads ("Jungle Animals Wallpaper", inside the first
+    40 characters), then up to two market phrases that each add new words, then one phrase
+    of a room or a look ("Kids Room Decor"), and last the seller's material qualifier,
+    taken from the template ("Peel and Stick", or "Peel and Stick or Traditional" when the
+    template also sells paste). Padding such as "Wall Decor" never counts as a new search,
+    a product noun ("Mural") is used once unless it is the product itself, and a phrase
+    that only says how the product goes on is left to the qualifier. Wallpaper and mural
+    are products now.
+  - **Material claims**: "removable", "self adhesive", "renter friendly", "temporary" and
+    "peel and stick" are written into a title or a tag only when the template's own title,
+    tags or materials make them. A template that mentions paste anywhere (title, tags,
+    materials, or its description: "traditional wallpaper", "pre-pasted", "wallpaper paste",
+    "non-adhesive") sells a product they are false for, so none is written and the
+    qualifier says both. The template's own tags are filtered the same way.
+  - **Tags**: at most 3 of the 13 are the shop-wide kind (the template's format and
+    material tags, and the market's most used tags that hold no word of the design); the
+    rest are about the design: its name with the product ("lemon wallpaper"), with
+    "mural", with a room the market names, and the market's own tags that carry a word of
+    it, ranked by the share of ranking listings that use them. Two tags that are one search
+    (`gift`/`gifts`, "wall mural"/"mural") never both go in. A tag the shop's other drafts
+    already carry ranks lower, and no draft shares 7 or more tags with another: within a
+    run (products are numbered in folder order, and each waits for the ones before it, so
+    the result does not depend on how they were scheduled) and against the upload history,
+    which now records each draft's tags (`tags`; older entries without them are fine).
+    The template's tags about its own look or room ("coastal wallpaper") are no longer
+    reused for other designs.
+  - Drafts of the same design again, or of designs the market describes alike, no longer
+    come out with the same thirteen tags.
+- **SEO page, Düzelt and `stallkit seo suggest`** suggest tags by the same rules: nothing
+  that is one search with a tag the listing has, no adhesive claim the listing does not make
+  (none if it also sells paste), no more of the shop's generic tags than the listing can
+  afford (3), and nothing that would put 7 of its tags on another listing.
+
+### Added
+- **SEO audit: two checks across your listings, and one on the title.** From the listings
+  already read (no extra Etsy call):
+  - *Tags shared with another listing*: 7 or more shared is a note (-3), 9 or more a
+    warning (-10); the other listing's id is in the message and the page's details. On the
+    audited shop 30 listings share 9 or more with another.
+  - *Generic tags*: 5 or more of a listing's tags are on at least half of the shop's
+    listings is a note (-3), more than half of its tags a warning (-10); not in a shop of
+    fewer than 5 listings.
+  - *Generic opening* (`title.generic_opening`): the first 40 characters hold no word about
+    the design is a warning (-10); the first phrase holds none ("Kitchen Wallpaper | ...")
+    but the 40 characters do is a note (-3). Not raised again when the first 40 characters
+    hold no keyword at all (`title.front_empty` already is).
+
+  A listing none of this applies to keeps its score. The SEO page (with a sentence for each
+  in Turkish and English), its CSV report and `stallkit seo audit` use all three; the
+  listings table and the dashboard still score each listing alone, so they show the opening
+  check but not the two across-listings ones.
+
 ## [0.3.3] — 2026-10-02
 
 ### Added

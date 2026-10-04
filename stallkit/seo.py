@@ -25,6 +25,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import vocab
 from .client import EtsyClient
 from .config import MAX_TAG_LEN, MAX_TAGS, MAX_TITLE_LEN
 
@@ -51,6 +52,9 @@ class Issue:
     code: str
     severity: str  # error | warn | info
     message: str
+    # The numbers behind a cross-listing or opening check (which other listing, which
+    # tags), for a screen that words the issue itself; empty for the older checks.
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -86,7 +90,50 @@ def content_words(text: str) -> list[str]:
     return [w for w in words(text) if w not in STOPWORDS and len(w) > 2]
 
 
-def audit_listing(listing: dict[str, Any]) -> Audit:
+_LEAD_END = re.compile(r"\s*[,|;·]\s*|\s+[-–—]\s+")
+
+
+def _visible_words(text: str, limit: int) -> list[str]:
+    """The whole words of `text` that end within its first `limit` characters."""
+    return [m.group().lower() for m in _WORD.finditer(text or "") if m.end() <= limit]
+
+
+def title_lead(title: str) -> str:
+    """A title's opening phrase: what comes before its first comma, pipe or dash, within
+    the first TITLE_VISIBLE_CHARS characters."""
+    return _LEAD_END.split(title.strip()[:TITLE_VISIBLE_CHARS], maxsplit=1)[0].strip()
+
+
+def generic_opening(title: str) -> tuple[str, str] | None:
+    """A title that does not open with its design: (level, the opening), else None.
+
+    A word is about the design when it is not a room, a product, a material or an
+    adhesive claim, a joining word or a marketplace-wide one (vocab.is_design_word:
+    "lemon" is, "kitchen" and "wallpaper" and "removable" are not). `level` is "window"
+    when none of the title's first TITLE_VISIBLE_CHARS characters is one, and "lead"
+    when some are but the opening phrase itself has none ("Kitchen Wallpaper | Mediterranean
+    Lemon ..."): the part a buyer scans first is the shop's, not the design's.
+    """
+    title = " ".join(str(title or "").split())
+    if not title:
+        return None
+    lead = title_lead(title)
+    if not vocab.design_words(_visible_words(title, TITLE_VISIBLE_CHARS)):
+        return "window", lead
+    if not vocab.design_words(_visible_words(lead, TITLE_VISIBLE_CHARS)):
+        return "lead", lead
+    return None
+
+
+def audit_listing(listing: dict[str, Any], shop: ShopAudit | None = None) -> Audit:
+    """Score one listing against Etsy's limits and the mechanics of its search.
+
+    `shop` (from `audit_shop` over the shop's listings) adds the two checks that need the
+    other listings: tags shared with another listing (`tags.shared`) and a tag list made
+    of the shop's own generic tags (`tags.generic`). Without it, a listing is judged on
+    its own, exactly as before; the opening check (`title.generic_opening`) needs no
+    shop and always runs.
+    """
     title = (listing.get("title") or "").strip()
     description = (listing.get("description") or "").strip()
     tags = [t for t in (listing.get("tags") or []) if t]
@@ -112,10 +159,27 @@ def audit_listing(listing: dict[str, Any]) -> Audit:
 
         head_words = set(content_words(title[:TITLE_VISIBLE_CHARS]))
         tail_words = set(content_words(title[TITLE_VISIBLE_CHARS:]))
-        if tail_words and not head_words:
+        front_empty = bool(tail_words and not head_words)
+        if front_empty:
             add(Issue("title.front_empty", "warn",
                       f"the first {TITLE_VISIBLE_CHARS} chars carry no keyword — that is all "
                       "a buyer sees before the title is truncated"))
+
+        # Words in the opening, but none that say what this design is: "Kitchen Wallpaper |
+        # Peel and Stick |...". Not on top of front_empty, which is the same problem again.
+        opening = generic_opening(title)
+        if opening is not None and not front_empty:
+            level, lead = opening
+            if level == "window":
+                add(Issue("title.generic_opening", "warn",
+                          f"nothing in the first {TITLE_VISIBLE_CHARS} chars says what the design is "
+                          f"({lead!r}): room, material and product words only",
+                          {"level": level, "lead": lead, "visible": TITLE_VISIBLE_CHARS}))
+            else:
+                add(Issue("title.generic_opening", "info",
+                          f"the title opens with a generic phrase ({lead!r}); the design's own "
+                          "words come after it",
+                          {"level": level, "lead": lead, "visible": TITLE_VISIBLE_CHARS}))
 
         counts = Counter(content_words(title))
         stuffed = [w for w, c in counts.items() if c >= 3]
@@ -173,6 +237,9 @@ def audit_listing(listing: dict[str, Any]) -> Audit:
             add(Issue("tags.title_mismatch", "warn",
                       f"{len(orphans)} tag(s) share no word with the title — Etsy ranks "
                       "listings higher when title and tags reinforce each other"))
+
+        if shop is not None and result.listing_id:
+            _add_shop_tag_issues(result, shop, tags)
 
     # --- description -----------------------------------------------------------
     if not description:
@@ -232,12 +299,42 @@ SHOP_WIDE_SHARE = 0.5
 # do not already say.
 MIN_DISTINCTIVE_TAGS = 5
 
+# Two listings that share this many of their tags are competing for the same searches
+# (Etsy rarely shows two listings of one shop for one query, so the second is wasted);
+# at SHARED_TAGS_WARN the overlap is most of the tag list, a warning rather than a note.
+SHARED_TAGS_MIN = 7
+SHARED_TAGS_WARN = 9
+# A listing with this many tags that are on at least half of the shop's listings is a
+# note; more than half of its own tags, a warning. A shop with fewer listings than GENERIC_MIN_LISTINGS
+# has no shop-wide tag worth the name.
+GENERIC_TAGS_INFO = 5
+GENERIC_MIN_LISTINGS = 5
+
+
+@dataclass
+class SharedTags:
+    """The listing a listing shares the most tags with, when that is SHARED_TAGS_MIN+."""
+
+    other: int
+    """The other listing's id."""
+    count: int
+    tags: list[str] = field(default_factory=list)
+    """The tags they share, alphabetically."""
+
 
 @dataclass
 class ShopAudit:
     listings: int
     shop_wide: list[tuple[str, int]] = field(default_factory=list)
     """Tags carried by more than SHOP_WIDE_SHARE of the shop, most common first."""
+    shared: dict[int, SharedTags] = field(default_factory=dict)
+    """listing_id -> the listing it shares most tags with, for listings sharing
+    SHARED_TAGS_MIN or more with another."""
+    generic_tags: list[str] = field(default_factory=list)
+    """The tags on at least half of the shop's listings (and at least three), most common
+    first; only in a shop of GENERIC_MIN_LISTINGS or more listings."""
+    generic_per_listing: dict[int, list[str]] = field(default_factory=dict)
+    """listing_id -> its tags among `generic_tags`."""
     distinctive_per_listing: dict[int, int] = field(default_factory=dict)
     crowded: list[tuple[int, str, int]] = field(default_factory=list)
     """(listing_id, title, distinctive count) for listings with too little of their own."""
@@ -281,6 +378,18 @@ def audit_shop(listings: Sequence[dict[str, Any]]) -> ShopAudit:
             result.crowded.append((listing_id, str(listing.get("title", ""))[:60], distinctive))
 
     result.crowded.sort(key=lambda row: row[2])
+    result.shared = shared_tags(per_listing)
+    if total >= GENERIC_MIN_LISTINGS:
+        # Half of the shop, rounded up, and never fewer than three listings: with five
+        # listings a tag on two of them is a theme, not the shop's.
+        wide_cutoff = max(3, -(-total // 2))
+        generic = {tag for tag, n in counts.items() if n >= wide_cutoff}
+        result.generic_tags = sorted(generic, key=lambda t: (-counts[t], t))
+        result.generic_per_listing = {
+            listing_id: sorted(tags & generic, key=lambda t: (-counts[t], t))
+            for listing_id, tags in per_listing.items()
+            if listing_id and tags & generic
+        }
 
     if result.shop_wide:
         share = result.shop_wide[0][1] / total
@@ -305,6 +414,71 @@ def audit_shop(listings: Sequence[dict[str, Any]]) -> ShopAudit:
             )
         )
     return result
+
+
+def shared_tags(per_listing: dict[int, set[str]]) -> dict[int, SharedTags]:
+    """For each listing sharing SHARED_TAGS_MIN or more tags with another, the worst one.
+
+    Exact and fast without comparing every pair: a listing with n tags that shares at
+    least k with another shares at least one of its (n - k + 1) least common tags (the
+    other tags can only account for k - 1), so only the listings that carry one of those
+    are compared. The shop-wide tags, the ones every listing carries, are the very
+    tags that need no comparing. Ties go to the lowest listing id.
+    """
+    postings: dict[str, list[int]] = {}
+    for listing_id, tags in per_listing.items():
+        for tag in tags:
+            postings.setdefault(tag, []).append(listing_id)
+    found: dict[int, SharedTags] = {}
+    for listing_id, tags in per_listing.items():
+        if not listing_id or len(tags) < SHARED_TAGS_MIN:
+            continue
+        rarest = sorted(tags, key=lambda t: (len(postings[t]), t))
+        candidates: set[int] = set()
+        for tag in rarest[: len(tags) - SHARED_TAGS_MIN + 1]:
+            candidates.update(postings[tag])
+        candidates.discard(listing_id)
+        candidates.discard(0)
+        best: tuple[int, int, set[str]] | None = None
+        for other in sorted(candidates):
+            common = tags & per_listing[other]
+            if len(common) >= SHARED_TAGS_MIN and (best is None or len(common) > best[0]):
+                best = (len(common), other, common)
+        if best is not None:
+            found[listing_id] = SharedTags(other=best[1], count=best[0], tags=sorted(best[2]))
+    return found
+
+
+def _add_shop_tag_issues(result: Audit, shop: ShopAudit, tags: Sequence[str]) -> None:
+    """The two audit checks that need the shop: tags shared with another listing, and
+    a tag list made mostly of the shop's own generic tags.
+
+    Weights (SEVERITY_WEIGHT): sharing SHARED_TAGS_MIN to SHARED_TAGS_WARN - 1 tags is an
+    info (-3), SHARED_TAGS_WARN or more a warning (-10); generic tags are an info (-3) from
+    GENERIC_TAGS_INFO of them and a warning (-10) once they are more than half of the
+    listing's tags. A listing that shares fewer tags and has fewer generic ones keeps its
+    score exactly.
+    """
+    add = result.issues.append
+    shared = shop.shared.get(result.listing_id)
+    if shared is not None:
+        add(Issue(
+            "tags.shared",
+            "warn" if shared.count >= SHARED_TAGS_WARN else "info",
+            f"{shared.count} of its {len(tags)} tags are also on listing {shared.other} — "
+            "two listings of one shop rarely both show for the same search",
+            {"other": shared.other, "shared": shared.count, "tags_used": len(tags),
+             "tags": list(shared.tags)},
+        ))
+    generic = shop.generic_per_listing.get(result.listing_id, [])
+    if len(generic) >= GENERIC_TAGS_INFO:
+        add(Issue(
+            "tags.generic",
+            "warn" if len(generic) > len(tags) / 2 else "info",
+            f"{len(generic)} of its {len(tags)} tags are on at least half of your listings "
+            f"({', '.join(generic[:3])}…) — they cannot tell this listing from the others",
+            {"generic": len(generic), "tags_used": len(tags), "tags": list(generic)},
+        ))
 
 
 def overlapping_pairs(
@@ -600,20 +774,25 @@ class TagSuggestions:
 
 
 def suggest_tags(
-    report: MarketReport, *, existing: Sequence[str] = (), extra: int = 5
+    report: MarketReport, *, existing: Sequence[str] = (), extra: int = 5,
+    candidates: Sequence[str] | None = None,
 ) -> TagSuggestions:
     """Tags common in the ranking set that this listing does not use yet.
 
     Split by whether they actually fit. Offering 13 suggestions to a listing with 12
     tags implies you can add 13 more; Etsy's ceiling is 13 in total, so only one
     would land. The rest are a genuine option, but only as a swap — say which.
+
+    `candidates` replaces the report's tags, in the order given, when the caller has
+    already chosen and ranked them (drop.generate.suggest_additions: the same rules the
+    draft builder follows, so a suggestion never repeats the shop's generic tags or a
+    claim the listing does not make). Those already on the listing are still left out.
     """
     have = {tag_key(t) for t in existing if str(t).strip()}
     free = max(0, MAX_TAGS - len(have))
 
-    candidates = [
-        tag for tag, _count in report.tags if tag not in have and len(tag) <= MAX_TAG_LEN
-    ]
+    pool = [tag for tag, _count in report.tags] if candidates is None else list(candidates)
+    candidates = [tag for tag in pool if tag_key(tag) not in have and len(tag) <= MAX_TAG_LEN]
     return TagSuggestions(
         add_now=candidates[:free],
         needs_a_swap=candidates[free : free + extra],

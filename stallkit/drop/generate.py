@@ -34,9 +34,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Union
 
+from .. import vocab
 from ..config import MAX_TAG_LEN, MAX_TAGS, MAX_TITLE_LEN
 from ..listings import TITLE_ONCE, bad_tag_chars, title_char_ok
-from ..seo import STOPWORDS
+from ..seo import SHARED_TAGS_MIN, STOPWORDS, tag_key
+from ..seo import _near_duplicates as _seo_near_duplicates
 from ..seo import words as _seo_words
 from .seeds import Seed, fold
 
@@ -61,74 +63,11 @@ MAX_ECHOES = 2
 
 # Product nouns, as tokens -> (family, how a title spells it). The family keeps a mug's
 # title from borrowing "Poster" from a concept search that also returned posters.
-_PRODUCTS: dict[tuple[str, ...], tuple[str, str]] = {
-    ("tshirt",): ("shirt", "T-Shirt"),
-    ("shirt",): ("shirt", "Shirt"),
-    ("tee",): ("shirt", "Tee"),
-    ("tank", "top"): ("tank", "Tank Top"),
-    ("tank",): ("tank", "Tank"),
-    ("sweatshirt",): ("sweatshirt", "Sweatshirt"),
-    ("crewneck",): ("sweatshirt", "Crewneck"),
-    ("sweater",): ("sweatshirt", "Sweater"),
-    ("pullover",): ("sweatshirt", "Pullover"),
-    ("hoodie",): ("hoodie", "Hoodie"),
-    ("onesie",): ("baby", "Onesie"),
-    ("bodysuit",): ("baby", "Bodysuit"),
-    ("mug",): ("mug", "Mug"),
-    ("cup",): ("mug", "Cup"),
-    ("tumbler",): ("tumbler", "Tumbler"),
-    ("water", "bottle"): ("bottle", "Water Bottle"),
-    ("poster",): ("wallart", "Poster"),
-    ("print",): ("wallart", "Print"),
-    ("wall", "art"): ("wallart", "Wall Art"),
-    ("art", "print"): ("wallart", "Art Print"),
-    ("wall", "decor"): ("wallart", "Wall Decor"),
-    ("canvas", "print"): ("wallart", "Canvas Print"),
-    ("art",): ("wallart", "Art"),
-    ("home", "decor"): ("decor", "Home Decor"),
-    ("decor",): ("decor", "Decor"),
-    ("sticker",): ("sticker", "Sticker"),
-    ("decal",): ("sticker", "Decal"),
-    ("tote", "bag"): ("tote", "Tote Bag"),
-    ("tote",): ("tote", "Tote"),
-    ("bag",): ("tote", "Bag"),
-    ("phone", "case"): ("phonecase", "Phone Case"),
-    ("iphone", "case"): ("phonecase", "iPhone Case"),
-    ("pillow", "case"): ("pillow", "Pillow Case"),
-    ("pencil", "case"): ("pencilcase", "Pencil Case"),
-    ("case",): ("phonecase", "Case"),
-    ("pillow",): ("pillow", "Pillow"),
-    ("cushion",): ("pillow", "Cushion"),
-    ("blanket",): ("blanket", "Blanket"),
-    ("ornament",): ("ornament", "Ornament"),
-    ("magnet",): ("magnet", "Magnet"),
-    ("keychain",): ("keychain", "Keychain"),
-    ("hat",): ("hat", "Hat"),
-    ("cap",): ("hat", "Cap"),
-    ("beanie",): ("hat", "Beanie"),
-    ("sock",): ("socks", "Socks"),
-    ("apron",): ("apron", "Apron"),
-    ("coaster",): ("coaster", "Coaster"),
-    ("notebook",): ("notebook", "Notebook"),
-    ("journal",): ("notebook", "Journal"),
-    ("card",): ("card", "Card"),
-    ("bookmark",): ("bookmark", "Bookmark"),
-    ("puzzle",): ("puzzle", "Puzzle"),
-    ("towel",): ("towel", "Towel"),
-    ("flag",): ("flag", "Flag"),
-    ("garden", "stake"): ("stake", "Garden Stake"),
-    ("necklace",): ("jewelry", "Necklace"),
-    ("earring",): ("jewelry", "Earrings"),
-    ("bracelet",): ("jewelry", "Bracelet"),
-    ("svg",): ("digital", "SVG"),
-    ("png",): ("digital", "PNG"),
-    ("clipart",): ("digital", "Clipart"),
-    ("digital", "download"): ("digital", "Digital Download"),
-}
-_NOUN_WORDS = {word for key in _PRODUCTS for word in key}
+_PRODUCTS = vocab.PRODUCTS
+_NOUN_WORDS = vocab.PRODUCT_WORDS
 # Phrases about one kind that suit another: "Living Room Decor" on a print or a pillow.
-_FITS = {"decor": {"wallart", "pillow", "blanket", "flag", "stake", "ornament", "coaster",
-                   "towel", "puzzle"}}
+_FITS = {"decor": {"wallart", "wallpaper", "pillow", "blanket", "flag", "stake", "ornament",
+                   "coaster", "towel", "puzzle"}}
 # Too vague to name the product at the head of a title on their own.
 _NOT_A_HEAD = {"Art", "Decor", "Home Decor", "Case", "Bag", "Cup", "Print"}
 # Garments, where "for Men and Women" is how Etsy titles name the audience.
@@ -138,25 +77,16 @@ _DIGITAL_WORDS = {"printable", "digital", "download", "downloadable", "instant",
                   "png", "pdf", "jpg", "sublimation"}
 
 # Words that carry no search of their own: a phrase must add something besides these.
-_GENERIC = {
-    "gift", "gifts", "present", "presents", "idea", "ideas", "best", "perfect", "unique",
-    "new", "sale", "awesome", "great", "clothing", "apparel", "clothes", "outfit", "item",
-    "items", "design", "designs", "top", "quality", "premium", "shop", "store", "style",
-    "stuff",
-}
+_GENERIC = vocab.GENERIC
 # Real searches, but marketplace-wide ones: a phrase whose only new words are these
 # ("Graphic Tee", "Birthday Gift") ranks below one about the design's own theme.
-_WEAK = {
-    "graphic", "cute", "funny", "trendy", "aesthetic", "birthday", "vintage", "retro",
-    "cool", "modern", "classic", "simple", "basic", "stocking", "stuffer", "christmas",
-    "holiday", "summer", "everyday", "casual", "soft", "comfy",
-}
-_AUDIENCE_WOMEN = {"her", "women", "womens", "woman", "ladies", "lady"}
-_AUDIENCE_MEN = {"him", "men", "mens", "man", "guys", "guy"}
-_AUDIENCE = _AUDIENCE_WOMEN | _AUDIENCE_MEN | {
-    "unisex", "kids", "kid", "boys", "girls", "boy", "girl", "toddler", "toddlers", "youth",
-    "adult", "adults", "teens", "teen",
-}
+_WEAK = vocab.WEAK
+_AUDIENCE_WOMEN = vocab.AUDIENCE_WOMEN
+_AUDIENCE_MEN = vocab.AUDIENCE_MEN
+_AUDIENCE = vocab.AUDIENCE
+# Padding around a product ("Wall Decor", "Home Decor"): a phrase of only these adds no
+# search, however many of them are new to the title.
+_FILLER = vocab.FILLER
 # What the product is made of or how it is made: true of some listings in the market,
 # not necessarily of this one. Used only when the seller's own template says so, and so
 # is a size (11oz, 8x10, 20oz); "Class of 2026" or "40th Birthday" is the design's theme.
@@ -179,8 +109,7 @@ _DEPENDENT_START = {"lover", "lovers", "loving", "themed", "inspired", "style", 
 _AFTER_HEAD = {"gift", "gifts", "set", "idea", "ideas", "box", "card", "bag", "basket",
                "tag", "wrap", "guide", "bundle"}
 _HEADS = {"gift", "gifts"}
-_MINOR = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "of", "on", "or", "the",
-          "to", "with", "vs"}
+_MINOR = vocab.MINOR
 _CASING = {
     "tshirt": "T-Shirt", "t-shirt": "T-Shirt", "iphone": "iPhone", "ipad": "iPad",
     "airpods": "AirPods", "diy": "DIY", "svg": "SVG", "png": "PNG", "pdf": "PDF",
@@ -190,12 +119,41 @@ _CASING = {
 # Words that never make a title about one design: joining words, generic and weak ones,
 # who it is for, "lover", "gift", claims about the product (material, size, brand).
 _PLAIN = (_GENERIC | _WEAK | _AUDIENCE | _DEPENDENT_START | _HEADS | _MINOR | _CLAIMS
-          | _DIGITAL_WORDS | {"graphic", "top", "tee", "gift", "unisex"})
+          | _DIGITAL_WORDS | vocab.ADHESIVE_WORDS | vocab.FILLER
+          | {"graphic", "top", "tee", "gift", "unisex"})
 # How a product noun is spelled in a tag: Etsy tags take letters, digits, spaces, - and '.
 _TAG_NOUNS = {"T-Shirt": "tshirt", "iPhone Case": "iphone case"}
 # Product names that are a search of their own, not a synonym: "iphone case" is not
 # "phone case", while "t-shirt", "tee" and "shirt" are one search to a tag list.
-_OWN_SEARCH = {"iPhone Case"}
+_OWN_SEARCH = {"iPhone Case", "Wallpaper", "Mural", "Wall Mural"}
+# ... except that "wall mural" and "mural" are one: "lemon mural", "lemon wall mural".
+_BAG_NAME = {"Wall Mural": "mural"}
+# What a buyer's search for a design adds to its name, by product: "lemon wallpaper",
+# "lemon mural", "dog dad gift". Only kinds that are a search of their own (_bag).
+_TAG_FORMS = {
+    "wallpaper": ("mural", "decor"), "wallart": ("wall art", "decor"),
+    "shirt": ("gift",), "sweatshirt": ("gift",), "hoodie": ("gift",), "tank": ("gift",),
+    "mug": ("gift",), "tumbler": ("gift",), "tote": ("gift",), "pillow": ("decor",),
+    "blanket": ("gift",), "ornament": ("gift",),
+}
+# A look or a room: the market phrase that closes a title before the material qualifier.
+_STYLE_ROOM = vocab.ROOMS | vocab.STYLES
+# Words a tag may be made of and still be about nothing in particular: "wallpaper mural",
+# "removable wallpaper", "gift for her", "graphic tee".
+_SHAPE_WORDS = (vocab.GENERIC | vocab.WEAK | vocab.AUDIENCE | vocab.ADHESIVE_WORDS
+                | vocab.FILLER | vocab.MINOR | vocab.PRODUCT_WORDS | _CLAIMS)
+# A colour or a plain adjective in front of the motif: "sage", "pastel", "dark".
+_MODIFIERS = vocab.COLOURS | vocab.WEAK
+# Generic shop-wide tags a draft may carry: they put the shop into those searches, but
+# every draft has them, so they cannot be what tells this design apart. A tag is generic
+# when the template's own tag list has it, or when it is among the market's most used
+# (GENERIC_TOP of them, at GENERIC_SHARE of the sample or more) and holds no word of the
+# design.
+GENERIC_SLOTS = 3
+GENERIC_SHARE = 0.25
+GENERIC_TOP = 10
+# Two drafts share at most this many tags: seo.SHARED_TAGS_MIN of them is cannibalising.
+MAX_SHARED_TAGS = SHARED_TAGS_MIN - 1
 # A number glued to its unit, the way sellers write it: 11oz, 8x10, 70s, 3d.
 _UNITS = {"oz", "ml", "l", "cm", "mm", "inch", "in", "ft", "s", "th", "st", "nd", "rd", "d",
           "x", "k", "pcs", "pc"}
@@ -262,14 +220,87 @@ def clean_tag(raw: str) -> str:
     return text if len(text) <= MAX_TAG_LEN else ""
 
 
+class SellerText(list):
+    """The seller's own words about the product: what `hint_from` returns.
+
+    A plain list of strings (the template's title, then its tags, then its description),
+    which is all `Hint` asks for; the parts it was made from ride along as attributes, so
+    the builders can tell the title from the tags, and know the materials, without a
+    second argument: `title`, `tags`, `description`, `materials`.
+    """
+
+    def __init__(self, parts: Sequence[str] = (), *, title: str = "",
+                 tags: Sequence[str] = (), description: str = "",
+                 materials: Sequence[str] = ()) -> None:
+        super().__init__(parts)
+        self.title = title
+        self.tags = list(tags)
+        self.description = description
+        self.materials = list(materials)
+
+
 def hint_from(title: str = "", tags: Sequence[str] | None = None,
-              description: str = "") -> list[str]:
+              description: str = "", materials: Sequence[str] | None = None) -> SellerText:
     """The seller's own words about the product, in the order the builders trust them.
 
-    `hint_from(template.source_title, template.tags, template.description)` is what
-    `build_title(..., product_hint=)` and `build_tags(..., product_hint=)` expect.
+    `hint_from(template.source_title, template.tags, template.description,
+    template.materials)` is what `build_title(..., product_hint=)` and
+    `build_tags(..., product_hint=)` expect. The materials are not part of the list (the
+    title, tags and description are); they only tell the builders what else the seller
+    says about the product (a template that lists "Traditional" among its materials
+    sells paste-up paper too).
     """
-    return [str(text) for text in (title, *(tags or []), description) if text]
+    texts = [str(text) for text in (title, *(tags or []), description) if text]
+    return SellerText(
+        texts, title=str(title or ""), tags=[str(t) for t in tags or [] if t],
+        description=str(description or ""), materials=[str(m) for m in materials or [] if m],
+    )
+
+
+@dataclass
+class _Seller:
+    """What the template says about how the product is made, and its own tags."""
+
+    adhesive: set[str] = field(default_factory=set)  # claims its title, tags, materials make
+    paste: bool = False  # it also sells (or only is) a pasted product
+    tags: list[str] = field(default_factory=list)  # its own tags, cleaned
+    qualifier: str = ""  # how a title closes: "Peel and Stick or Traditional"
+
+
+def _seller(hint: Hint) -> _Seller:
+    """The claims a template makes about how its product goes on, and its own tags.
+
+    "Removable", "self adhesive", "renter friendly", "temporary" and "peel and stick" are
+    claims about the whole listing only when the template makes them (in its title, tags
+    or materials) and nowhere says some of it is pasted: a template that lists
+    "Traditional" next to "Peel and Stick" sells both, and "removable" is then false for
+    one of the two (vocab.mentions_paste). Then none of them is written into a title or a
+    tag, and the title closes with the qualifier "Peel and Stick or Traditional" instead.
+    A hint that is not `SellerText` (a bare string or list) is one block of the seller's
+    words: its tags are not known, and nothing in it is told from a description.
+    """
+    if isinstance(hint, SellerText):
+        claims = [hint.title, *hint.tags, *hint.materials]
+        prose = [hint.description]
+        tags = [t for t in (clean_tag(t) for t in hint.tags) if t]
+    else:
+        claims, prose, tags = _hint_texts(hint), [], []
+    adhesive: set[str] = set()
+    for text in claims:
+        adhesive |= vocab.adhesive_claims(_tokens(text))
+    paste = vocab.mentions_paste(claims, prose)
+    return _Seller(adhesive, paste, list(dict.fromkeys(tags)), _qualifier(adhesive, paste))
+
+
+def _qualifier(adhesive: set[str], paste: bool) -> str:
+    """The material qualifier that closes a title, or "" when the template makes no claim."""
+    if not adhesive:
+        return ""
+    base = ("Peel and Stick" if adhesive & {vocab.PEEL_AND_STICK, vocab.ADHESIVE}
+            else "Removable" if vocab.REMOVABLE in adhesive else "")
+    if not base:
+        return ""
+    return f"{base} or Traditional" if paste else base
 
 
 def research_keyword(seed: Seed, hint: Hint = None) -> str:
@@ -301,7 +332,7 @@ def _distinctive(text: str) -> set[str]:
 
 
 def product_tags(tags: Sequence[str] | None, template_title: str = "",
-                 seed: Seed | None = None) -> list[str]:
+                 seed: Seed | None = None, hint: Hint = None) -> list[str]:
     """The template listing's tags that suit any design of its product, cleaned.
 
     Its tags about its own design are left out: a tag holding a distinctive word of the
@@ -309,8 +340,13 @@ def product_tags(tags: Sequence[str] | None, template_title: str = "",
     Shirt, ... Hiking Gift") would put another design's words on this one. A word the
     new design shares ("mountain" for "mountain goat trail") is fine. Without a title
     nothing is known to be the template's own, so every tag is kept.
+
+    With `hint` (`hint_from(...)`), a tag whose adhesive claim ("removable", "self
+    adhesive", "renter friendly") is not true of the whole listing is left out too: the
+    template that also sells paste-up paper cannot tag every draft "removable wallpaper".
     """
     own = _distinctive(template_title) - (_distinctive(seed.text) if seed else set())
+    allowed = _allowed_adhesive(hint) if hint is not None else None
 
     def about_the_template(tag: str) -> bool:
         # A word of it, or the start of one: Etsy's 20 characters cut "retro mountain
@@ -323,9 +359,18 @@ def product_tags(tags: Sequence[str] | None, template_title: str = "",
     out: list[str] = []
     for raw in tags or []:
         tag = clean_tag(raw)
+        if allowed is not None and tag and vocab.adhesive_claims(_tokens(tag)) - allowed:
+            continue
         if tag and tag not in out and not (own and about_the_template(tag)):
             out.append(tag)
     return out
+
+
+def _allowed_adhesive(hint: Hint) -> set[str]:
+    """The adhesive claims that may be written for this seller's listings: the ones the
+    template itself makes, and none at all when it also sells a pasted product."""
+    seller = _seller(hint)
+    return set() if seller.paste else set(seller.adhesive)
 
 
 # --- words and phrases --------------------------------------------------------------
@@ -408,6 +453,12 @@ class _Phrase:
                       if i not in head and k not in STOPWORDS}
         self.text = " ".join(self.tokens)
         self.claims = {t for t in self.tokens if _is_claim(t)}
+        # "peel and stick", "removable": claims about how the product goes on, which only
+        # the seller's own template may make (and not a template that sells paste too).
+        self.adhesive = vocab.adhesive_claims(self.tokens)
+        # A room or a look ("kitchen wallpaper", "cottagecore bedroom decor"): the phrase
+        # a title ends on, after the ones that name what the design is.
+        self.styled = any(k in _STYLE_ROOM for k in self.keys)
 
     @property
     def broken(self) -> bool:
@@ -418,6 +469,9 @@ class _Phrase:
         if tokens[0] in _DEPENDENT_START:
             return True
         if any(len(t) == 1 and t.isalpha() for t in tokens):
+            return True
+        # Half of "peel and stick": the stopword cut it in two.
+        if tokens[-1] == "peel" or tokens[0] == "stick":
             return True
         heads = {end - 1 for _start, end, *_ in self.nouns}
         heads |= {i for i, t in enumerate(tokens) if t in _HEADS}
@@ -439,11 +493,12 @@ class _Phrase:
 
     def novelty(self, used: dict[str, int]) -> tuple[float, set[str]]:
         """How much new search this phrase adds: a theme word counts 1, "gift" or
-        "lover" a half, so "Coffee Lover Gift" still adds to "But First Coffee Mug"."""
-        new = {k for k in self.meaningful() if k not in used}
+        "lover" a half, so "Coffee Lover Gift" still adds to "But First Coffee Mug".
+        Padding ("Wall Decor", "Home Decor") counts a half at most, never a new search."""
+        new = {k for k in self.meaningful() if k not in used and k not in _FILLER}
         if new:
             return float(len(new)), new
-        generic = {k for k in self.words if k in _GENERIC and k not in used}
+        generic = {k for k in self.words if (k in _GENERIC or k in _FILLER) and k not in used}
         return 0.5 * len(generic), new
 
 
@@ -542,6 +597,9 @@ class _Product:
     in_concept: bool = False
     audience: set[str] = field(default_factory=set)  # women / men, as the template says
     claims: set[str] = field(default_factory=set)  # claim words the seller's text makes
+    adhesive: set[str] = field(default_factory=set)  # adhesive claims that may be written
+    qualifier: str = ""  # how the title closes ("Peel and Stick or Traditional")
+    template_tags: list[str] = field(default_factory=list)  # the template's own tags
 
 
 def _hint_texts(hint: Hint) -> list[str]:
@@ -552,6 +610,17 @@ def _hint_texts(hint: Hint) -> list[str]:
     return [str(h) for h in hint if h]
 
 
+def _head_noun(nouns: Sequence[tuple[int, int, str, str]]) -> tuple[int, int, str, str]:
+    """The noun that names the product in a title's opening phrase: the last one, except
+    that "Wallpaper Mural" is a wallpaper, not a mural."""
+    last = nouns[-1]
+    if last[2] == "wallpaper":
+        plain = [n for n in nouns if n[2] == "wallpaper" and n[3] == "Wallpaper"]
+        if plain:
+            return plain[0]
+    return last
+
+
 def _product(seed: Seed, report: MarketReport | None, hint: Hint,
              phrases: list[_Phrase]) -> _Product:
     """Which product this listing is: named in the file, in the template, or by the market."""
@@ -559,6 +628,10 @@ def _product(seed: Seed, report: MarketReport | None, hint: Hint,
     hint_tokens = [t for text in texts for t in _tokens(text)]
     product = _Product(claims={fold(t) for t in hint_tokens if _is_claim(t)})
     product.claims |= {_key(t) for t in hint_tokens if _is_claim(t)}
+    seller = _seller(hint)
+    product.adhesive = set() if seller.paste else set(seller.adhesive)
+    product.qualifier = seller.qualifier
+    product.template_tags = seller.tags
     hint_keys = {_key(t) for t in hint_tokens}
     if hint_keys & _AUDIENCE_WOMEN:
         product.audience.add("women")
@@ -574,8 +647,9 @@ def _product(seed: Seed, report: MarketReport | None, hint: Hint,
         first = re.split(r"[,|/:;]| - ", text, maxsplit=1)[0]
         nouns = [n for n in _nouns(_tokens(first)) if n[2] not in _FITS]
         if index == 0 and nouns:
-            tally = {nouns[-1][2]: 1}
-            shown = {nouns[-1][2]: nouns[-1][3]}
+            head = _head_noun(nouns)
+            tally = {head[2]: 1}
+            shown = {head[2]: head[3]}
             break
         for _s, _e, family, display in _nouns(_tokens(text)):
             tally[family] = tally.get(family, 0) + 1
@@ -686,6 +760,8 @@ def _allowed(phrase: _Phrase, product: _Product) -> bool:
         return False
     if product.family != "digital" and set(phrase.keys) & _DIGITAL_WORDS:
         return False
+    if phrase.adhesive - product.adhesive:
+        return False  # "removable": the template does not say so, or also sells paste
     return all(fold(c) in product.claims or _key(c) in product.claims for c in phrase.claims)
 
 
@@ -759,6 +835,7 @@ class _Plan:
     phrases: list[_Phrase]  # every market phrase this product may use
     product: _Product
     concept_keys: set[str]
+    qualifier: str = ""  # the seller's material qualifier, last in the title
 
 
 def _noun_word(display: str) -> str:
@@ -787,8 +864,16 @@ def _plan(seed: Seed, report: MarketReport | None = None, hint: Hint = None) -> 
     for token in _tokens(head):
         used[_key(token)] = used.get(_key(token), 0) + 1
     nouns_used: dict[str, int] = {}
+    primary = ""
     if product.display:
-        nouns_used[_noun_word(product.display)] = 1
+        primary = _noun_word(product.display)
+        nouns_used[primary] = 1
+
+    # The material qualifier closes the title ("Peel and Stick or Traditional"): its room
+    # is kept back, and it is left out only when the design's own name already says it.
+    qualifier = product.qualifier
+    if qualifier and {_key(t) for t in _tokens(qualifier)} <= set(used):
+        qualifier = ""
 
     candidates = [p for p in phrases if _allowed(p, product)]
     elsewhere = {id(p) for p in _other_products(phrases, candidates, product)}
@@ -796,14 +881,23 @@ def _plan(seed: Seed, report: MarketReport | None = None, hint: Hint = None) -> 
     # noun comes from a corner of the market (the prints in a mug search): "Gallery Wall".
     ours = _family_count(phrases, report, product.family)
     minor = {id(p) for p in candidates if p.family is None and p.count < 0.25 * ours}
+    # The qualifier says how the product goes on, once: a phrase that says it again
+    # ("Peel and Stick Wallpaper") is left out of a title.
+    pool = [p for p in candidates if not p.adhesive]
     chosen: list[_Phrase] = []
     segments: list[str] = []
-    length = len(head)
+    length = len(head) + (2 + len(qualifier) if qualifier else 0)
     echoes = 0  # phrases that brought a concept word back
-    while len(segments) < MAX_TITLE_SEGMENTS - 1:
+
+    def choose(kind: str) -> bool:
+        """Add the best market phrase of this kind: "buyer" (what the design is) or
+        "style" (a room or a look). False when none fits."""
+        nonlocal length, echoes
         best: tuple[tuple[float, int, str], _Phrase, str, bool] | None = None
-        for phrase in candidates:
+        for phrase in pool:
             if any(phrase is c for c in chosen) or id(phrase) in elsewhere | minor:
+                continue
+            if phrase.styled != (kind == "style"):
                 continue
             novelty, new = phrase.novelty(used)
             if novelty < 1:
@@ -816,7 +910,8 @@ def _plan(seed: Seed, report: MarketReport | None = None, hint: Hint = None) -> 
             repeats = {k for k in phrase.words if k in used
                        and not (k in _HEADS and used[k] < 2)}
             if repeats and (
-                len(repeats) > 1
+                kind == "style"  # a room or a look adds new words, it does not echo
+                or len(repeats) > 1
                 or echoes >= MAX_ECHOES
                 or not repeats <= concept_keys
                 or any(used[k] > 1 for k in repeats)
@@ -827,9 +922,12 @@ def _plan(seed: Seed, report: MarketReport | None = None, hint: Hint = None) -> 
                 continue
             if phrase.audience and any(k in _AUDIENCE for k in used):
                 continue
+            # The product's own noun twice at most, any other noun ("Mural" after
+            # "Wallpaper") once.
             words = [_noun_word(shown) for _s, _e, family, shown in phrase.nouns
                      if family == product.family]
-            if any(nouns_used.get(w, 0) + words.count(w) > 2 for w in words):
+            if any(nouns_used.get(w, 0) + words.count(w) > (2 if w == primary else 1)
+                   for w in words):
                 continue
             if sum(nouns_used.values()) + len(words) > MAX_TITLE_NOUNS:
                 continue
@@ -852,7 +950,7 @@ def _plan(seed: Seed, report: MarketReport | None = None, hint: Hint = None) -> 
             if best is None or rank > best[0]:
                 best = (rank, phrase, shown, bool(repeats))
         if best is None:
-            break
+            return False
         _rank, phrase, shown, echoed = best
         echoes += echoed
         chosen.append(phrase)
@@ -863,15 +961,23 @@ def _plan(seed: Seed, report: MarketReport | None = None, hint: Hint = None) -> 
         for _s, _e, family, noun in phrase.nouns:
             if family == product.family:
                 nouns_used[_noun_word(noun)] = nouns_used.get(_noun_word(noun), 0) + 1
+        return True
 
-    # The audience goes last, the way a buyer reads it: "…, Camping Shirt for Men and Women".
+    # The design's own phrase leads (the head); then up to two phrases of what it is, then
+    # one of the room or look it suits, which a buyer scans last. With no room or look in
+    # the market, a third phrase of what it is takes that place.
+    for kind in ("buyer", "buyer", "style"):
+        if not choose(kind) and kind == "style":
+            choose("buyer")
+
+    # The audience goes last, the way a buyer reads it: "..., Camping Shirt for Men and Women".
     order = sorted(range(len(segments)), key=lambda i: bool(chosen[i].audience))
     chosen = [chosen[i] for i in order]
     segments = [segments[i] for i in order]
     _add_audience(segments, chosen, product, report, used, length)
     usable = [p for p in candidates
               if id(p) not in elsewhere and not _spans(p, concept_last)]
-    return _Plan(head, segments, chosen, usable, product, concept_keys)
+    return _Plan(head, segments, chosen, usable, product, concept_keys, qualifier)
 
 
 def _add_audience(segments: list[str], chosen: list[_Phrase], product: _Product,
@@ -927,8 +1033,10 @@ def build_title(seed: Seed, report: MarketReport | None = None, *,
     Etsy accepts.
     """
     plan = _plan(seed, report, product_hint)
-    title = ", ".join([plan.head, *plan.segments])
-    return _fit(_title_safe(title), MAX_TITLE_LEN).strip(" ,-|/")
+    parts = [plan.head, *plan.segments]
+    if plan.qualifier:
+        parts.append(plan.qualifier)
+    return _fit(_title_safe(", ".join(parts)), MAX_TITLE_LEN).strip(" ,-|/")
 
 
 # --- tags ---------------------------------------------------------------------------
@@ -943,7 +1051,7 @@ def _bag(tag: str) -> frozenset[str]:
     keys: set[str] = set()
     covered: set[int] = set()
     for start, end, family, shown in _nouns(tokens):
-        keys.add("@" + (shown.lower() if shown in _OWN_SEARCH else family))
+        keys.add("@" + _BAG_NAME.get(shown, shown.lower() if shown in _OWN_SEARCH else family))
         covered.update(range(start, end))
     keys |= {_key(t) for i, t in enumerate(tokens) if i not in covered}
     return frozenset(k for k in keys if k not in STOPWORDS)
@@ -988,77 +1096,264 @@ def _tag_pieces(phrase: _Phrase) -> list[str]:
     return pieces
 
 
+@dataclass
+class _Cand:
+    """A tag that may be one of the thirteen: its text, how much it is worth before the
+    market says anything (`prior`), its share of the sampled listings, and whether it is
+    one of the shop-wide tags every draft would carry."""
+
+    text: str
+    prior: float
+    share: float = 0.0
+    generic: bool = False
+
+
+def _shares(report: MarketReport | None) -> dict[str, float]:
+    """tag_key -> the share of the sampled listings that use it, as a tag or in a title."""
+    out: dict[str, float] = {}
+    if not _has_market(report):
+        return out
+    assert report is not None
+    for rows in (report.tags, report.phrases):
+        for text, count in _rows(rows):
+            key = tag_key(text)
+            out[key] = max(out.get(key, 0.0), _share(count, report))
+    return out
+
+
+def _near(a: str, b: str) -> bool:
+    """The audit's near-duplicate rule (seo._near_duplicates) for two tags, or one tag."""
+    return tag_key(a) == tag_key(b) or bool(_seo_near_duplicates([tag_key(a), tag_key(b)]))
+
+
+def _clash(tag: str, existing: Sequence[str]) -> bool:
+    """Whether `tag` would burn a second slot on a search `existing` already holds."""
+    return any(_near(tag, other) for other in existing) or _too_similar(tag, list(existing))
+
+
+def _core_words(seed: Seed, product: _Product) -> list[str]:
+    """The concept's words, without the product noun it already names."""
+    tokens = _tokens(seed.text)
+    skip: set[int] = set()
+    if product.in_concept and product.family:
+        skip = {i for start, end, family, _d in _nouns(tokens) if family == product.family
+                for i in range(start, end)}
+    return [t for i, t in enumerate(tokens) if i not in skip]
+
+
+def _is_design_word(word: str) -> bool:
+    return vocab.is_design_word(word) and word not in vocab.COLOURS
+
+
+def _windows(core: Sequence[str]) -> list[tuple[str, float]]:
+    """Runs of up to three of the concept's words that name something, each with how much
+    of what the design is about it holds (1.0 holds all of it).
+
+    "mediterranean lemon" gives "lemon" and "mediterranean lemon" (a colour or a room
+    alone, "pastel" or "nursery", is not something a design is about). A run that ends on
+    the concept's last word, which in English is what the design is ("air balloon", not
+    "hot air"), counts more: that is where the product noun goes.
+    """
+    motifs = [w for w in core if _is_design_word(w)]
+    found: dict[str, float] = {}
+    for size in range(min(3, len(core)), 0, -1):
+        for start in range(len(core) - size + 1):
+            run = core[start:start + size]
+            if run[0] in STOPWORDS or run[-1] in STOPWORDS:
+                continue
+            held = [w for w in run if _is_design_word(w)]
+            if not held:
+                continue
+            cover = len(held) / max(1, len(motifs))
+            bonus = 0.15 if start + size == len(core) else 0.0
+            found.setdefault(" ".join(run), cover + bonus + 0.01 * size)
+    return sorted(found.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+_ROOM_NAMES = {"kitchen", "bedroom", "nursery", "bathroom", "office", "playroom", "entryway",
+               "hallway", "pantry", "closet", "laundry", "mudroom", "nook", "dorm", "sunroom",
+               "basement", "porch"}
+
+
+def _market_rooms(report: MarketReport | None, taken: set[str]) -> list[str]:
+    """The rooms the market's tags and titles name, most used first."""
+    counts: dict[str, int] = {}
+    if _has_market(report):
+        assert report is not None
+        for rows in (report.tags, report.phrases):
+            for text, count in _rows(rows):
+                for token in _tokens(text):
+                    key = _key(token)
+                    if key in _ROOM_NAMES and key not in taken:
+                        counts[key] = max(counts.get(key, 0), count)
+    return [room for room, _n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def _tag_candidates(seed: Seed, report: MarketReport | None, plan: _Plan,
+                    hint: Hint) -> list[_Cand]:
+    """Every tag worth considering for this design, each with a prior.
+
+    In order of worth: the concept itself; the design's own phrases with the product
+    ("lemon wallpaper", "lemon mural", "dog dad shirt") and with a room the market names
+    ("lemon kitchen"); the market's own tags that carry a word of the design; its other
+    phrases; the concept's own word pairs and single words, last. A tag with no word of
+    the design (the template's own tags, and the market's most used) is `generic`.
+    """
+    product = plan.product
+    shares = _shares(report)
+    core = _core_words(seed, product)
+    design_keys = {_key(w) for w in core if _is_design_word(w)} or {_key(w) for w in core}
+    noun = _TAG_NOUNS.get(product.display, product.display.lower()) if product.family else ""
+    forms = ([noun, *_TAG_FORMS.get(product.family or "", ())]) if noun else []
+    seller_title = hint.title if isinstance(hint, SellerText) else ""
+    template = product_tags(product.template_tags, seller_title, seed, hint=hint)
+    template_keys = {tag_key(t) for t in product.template_tags}
+    sized = sorted(((tag_key(t), c) for t, c in _rows(report.tags)),
+                   key=lambda kv: (-kv[1], kv[0])) if _has_market(report) else []
+    market_generic = {k for k, count in sized[:GENERIC_TOP]
+                      if _share(count, report) >= GENERIC_SHARE}
+
+    def shape(tag: str) -> bool:
+        """Made of format, material, product and marketplace words only."""
+        return all(w in _SHAPE_WORDS or vocab.stem(w) in _SHAPE_WORDS
+                   for w in (_key(t) for t in _tokens(tag)))
+
+    def generic(tag: str) -> bool:
+        if {_key(t) for t in _tokens(tag)} & design_keys:
+            return False
+        key = tag_key(tag)
+        return key in template_keys or key in market_generic or shape(tag)
+
+    found: dict[str, _Cand] = {}
+
+    def offer(raw: str, prior: float, *, as_generic: bool | None = None) -> None:
+        tag = clean_tag(raw)
+        if not tag:
+            return
+        key = tag_key(tag)
+        share = shares.get(key, 0.0)
+        wide = generic(tag) if as_generic is None else as_generic
+        if wide and len(_tokens(tag)) < 2:
+            # "wallpaper", "gift": one word of the shop's is no shop-wide tag worth a slot,
+            # only a last resort.
+            wide, prior = False, min(prior, 0.04)
+        cand = _Cand(tag, prior, share, wide)
+        known = found.get(key)
+        if known is None or cand.prior > known.prior:
+            found[key] = cand
+
+    offer(seed.text, 1.0, as_generic=False)
+    windows = _windows(core)
+    for window, cover in windows:
+        for index, form in enumerate(forms):
+            offer(f"{window} {form}", 0.6 + 0.25 * min(cover, 1.0) - 0.05 * index,
+                  as_generic=False)
+    for position, (window, _cover) in enumerate(windows[:2]):
+        for room in _market_rooms(report, set(core)):
+            offer(f"{window} {room}", 0.56 - 0.02 * position, as_generic=False)
+            if noun:
+                offer(f"{window} {room} {noun}", 0.54 - 0.02 * position, as_generic=False)
+
+    for phrase in sorted(plan.phrases, key=lambda p: p.text):
+        rooted = bool(set(phrase.keys) & design_keys)
+        prior = 0.85 if rooted else 0.40
+        prior += 0.05 * phrase.tagged + 0.10 * any(phrase is c for c in plan.chosen)
+        if len(phrase.text) <= MAX_TAG_LEN:
+            offer(phrase.text, prior)
+        elif not generic(phrase.text):
+            for piece in _tag_pieces(phrase):
+                offer(piece, 0.45)
+
+    for tag in template:
+        # The template's tag about its own look or room ("coastal wallpaper", "cottage
+        # kitchen") is the template's, not the shop's: only the format and material tags
+        # that every draft of the shop may carry are kept.
+        if shape(tag):
+            offer(tag, 0.30, as_generic=True)
+    # The concept's own word pairs and words, and the product alone: what is left when
+    # nothing better is.
+    for index in range(len(core) - 1):
+        offer(f"{core[index]} {core[index + 1]}", 0.25, as_generic=False)
+    for word in core:
+        if word not in STOPWORDS:
+            offer(word, 0.08, as_generic=False)
+    if noun:
+        offer(noun, 0.02, as_generic=False)
+    return list(found.values())
+
+
 def build_tags(seed: Seed, report: MarketReport | None = None, *,
-               product_hint: Hint = None) -> list[str]:
+               product_hint: Hint = None, taken: Sequence[Sequence[str]] = ()) -> list[str]:
     """Thirteen tags at most, each within Etsy's length and character rules.
 
-    Order of preference: the concept; the market's own tags that carry a concept word;
-    the concept with the product; the title's phrases; the market's other tags and
-    phrases; generic ones ("gift for her"); single words last — they compete with the
-    whole marketplace, so they are the least valuable thing to spend a slot on.
+    Mostly about this design, a little about the shop. The design's own phrases lead:
+    the concept, the concept with the product ("lemon wallpaper"), with a word that is a
+    search of its own ("lemon mural"), with a room the market names, and the market's own
+    tags that carry a word of the design, ranked by the share of the sampled listings that
+    use them. At most GENERIC_SLOTS tags are the shop-wide kind (the template's own tags,
+    and the market's most used ones that no design word is in): "removable wallpaper"
+    on every draft is what made a shop's listings compete with each other.
+
+    `taken` is the tags of the drafts made before this one (this run's, and the upload
+    history's): a tag one of them already holds is worth less, and no tag is taken that
+    would put MAX_SHARED_TAGS + 1 tags in common with any one of them. Two tags that are
+    one search (`seo._near_duplicates`, "gift"/"gifts") never both go in. The claims the
+    template does not make for the whole listing ("removable" on a template that also
+    sells paste-up paper) are never tags. Nothing here depends on the order of the
+    market's rows or on anything but the arguments.
     """
     plan = _plan(seed, report, product_hint)
-    product = plan.product
-    tags: list[str] = []
+    taken_sets = [{tag_key(t) for t in tags if str(t).strip()} for tags in taken]
+    used: dict[str, int] = {}
+    for tags in taken_sets:
+        for key in tags:
+            used[key] = used.get(key, 0) + 1
+    shared = [0] * len(taken_sets)
+    candidates = _tag_candidates(seed, report, plan, product_hint)
+    template_rank = {tag_key(t): i for i, t in enumerate(plan.product.template_tags)}
 
-    def add(raw: str) -> None:
-        if len(tags) >= MAX_TAGS:
-            return
-        tag = clean_tag(raw)
-        if tag and not _too_similar(tag, tags):
-            tags.append(tag)
+    def score(cand: _Cand) -> float:
+        value = cand.prior + 0.6 * min(cand.share, 0.5)
+        if not cand.generic:
+            value -= 0.35 * min(used.get(tag_key(cand.text), 0), 2)
+        return value
 
-    def generic(phrase: _Phrase) -> bool:
-        return not phrase.meaningful()
+    specific = sorted((c for c in candidates if not c.generic), key=lambda c: (-score(c), c.text))
+    shop_wide = sorted(
+        (c for c in candidates if c.generic),
+        key=lambda c: (tag_key(c.text) not in template_rank,
+                       template_rank.get(tag_key(c.text), 0), -c.share, c.text))
+    own: list[str] = []  # about the design
+    wide: list[str] = []  # shop-wide
 
-    add(seed.text)
+    def room(tag: str, *, strict: bool) -> bool:
+        if len(own) + len(wide) >= MAX_TAGS or _clash(tag, [*own, *wide]):
+            return False
+        key = tag_key(tag)
+        return not (strict and any(key in held and count >= MAX_SHARED_TAGS
+                                   for held, count in zip(taken_sets, shared)))
 
-    tagged = sorted((p for p in plan.phrases if p.tagged), key=lambda p: (-p.count, p.text))
-    rooted = [p for p in tagged if set(p.keys) & plan.concept_keys][:4]
-    for phrase in rooted:
-        add(phrase.text)
+    def keep(tag: str, into: list[str]) -> None:
+        into.append(tag)
+        key = tag_key(tag)
+        for index, held in enumerate(taken_sets):
+            if key in held:
+                shared[index] += 1
 
-    # The concept with the product, when the market's own tags did not say it: the whole
-    # concept, or its opening pair ("black cat mug", "national park print"). A single word
-    # of it can mislead ("black mug"), and a later pair rarely reads ("mom ever mug").
-    noun = ""
-    if product.family:
-        noun = _TAG_NOUNS.get(product.display, product.display.lower())
-    words = [w for w in seed.words if w not in STOPWORDS]
-    if noun and not product.in_concept and len(rooted) < 3:
-        add(f"{seed.text} {noun}")
-        if len(words) > 2:
-            add(f"{words[0]} {words[1]} {noun}")
-
-    for phrase in plan.chosen:
-        add(phrase.text)
-    for phrase in tagged:
-        if not generic(phrase):
-            add(phrase.text)
-    untagged = sorted((p for p in plan.phrases if not p.tagged), key=lambda p: (-p.count, p.text))
-    for phrase in untagged:
-        if not generic(phrase):
-            add(phrase.text)
-    # A phrase too long for a tag still holds a shorter search, and research keeps only
-    # the long one: "monstera leaf phone case" (24 characters) gives "leaf phone case".
-    for phrase in untagged:
-        if len(phrase.text) > MAX_TAG_LEN and not generic(phrase):
-            for piece in _tag_pieces(phrase):
-                before = len(tags)
-                add(piece)
-                if len(tags) > before:
-                    break
-    for phrase in tagged:
-        if generic(phrase):
-            add(phrase.text)
-
-    for index in range(len(words) - 1):
-        add(f"{words[index]} {words[index + 1]}")
-    for word in words:
-        add(word)
-    if noun:
-        add(noun)
-    return tags[:MAX_TAGS]
+    for cand in shop_wide:
+        if len(wide) < GENERIC_SLOTS and room(cand.text, strict=True):
+            keep(cand.text, wide)
+    for strict in (True, False):
+        for cand in specific:
+            if len(own) + len(wide) < MAX_TAGS and cand.text not in own and room(
+                    cand.text, strict=strict):
+                keep(cand.text, own)
+    # Nothing about the design is left to say: a shop-wide tag is still worth more than an
+    # empty slot.
+    for cand in shop_wide:
+        if cand.text not in wide and room(cand.text, strict=False):
+            keep(cand.text, wide)
+    return [*own, *wide][:MAX_TAGS]
 
 
 def fill_tags(tags: list[str], extra: Sequence[str]) -> int:
@@ -1068,10 +1363,91 @@ def fill_tags(tags: list[str], extra: Sequence[str]) -> int:
         if len(tags) >= MAX_TAGS:
             break
         tag = clean_tag(raw)
-        if tag and not _too_similar(tag, tags):
+        if tag and not _clash(tag, tags):
             tags.append(tag)
             added += 1
     return added
+
+
+def suggest_additions(
+    report: MarketReport | None, *, existing: Sequence[str] = (), text: Hint = None,
+    title: str = "", shop: Sequence[Sequence[str]] = (), wide: Sequence[str] = (),
+) -> list[tuple[str, int]]:
+    """The market's tags worth adding to a listing that is already live, best first.
+
+    The same rules a draft's tags follow, for a seller's existing listing (the SEO
+    page's "Düzelt" and `stallkit seo suggest`):
+
+    - a tag the listing already has, or that is one search with one it has
+      (`seo._near_duplicates`), is never offered;
+    - nor is an adhesive claim the listing does not make for the whole of itself (`text`:
+      its own title, tags, materials and description): "removable" on a listing that sells
+      paste-up paper too, or that never says it is removable;
+    - at most GENERIC_SLOTS of the listing's tags may be the shop's generic ones (`wide`:
+      the tags on at least half of the shop's listings; and the market's most used ones
+      that hold no word of the listing's `title`), so a listing that has that many is
+      offered none;
+    - `shop` is the other listings' tags: a tag they use ranks lower, and none is offered
+      that would put SHARED_TAGS_MIN of this listing's tags on one of them.
+
+    Rows are (tag, listings using it), most used first.
+    """
+    if not _has_market(report):
+        return []
+    assert report is not None
+    have = [t for t in (clean_tag(t) for t in existing) if t]
+    have_keys = {tag_key(t) for t in have}
+    allowed = _allowed_adhesive(text)
+    design = {_key(w) for w in vocab.design_words(_tokens(title))}
+    wide_keys = {tag_key(t) for t in wide}
+    rows = sorted(_rows(report.tags), key=lambda row: (-row[1], tag_key(row[0])))
+    # With no design word in the title, the market's most used tags cannot be told apart
+    # from the design's own: only the shop's own (`wide`) and the plainly generic count.
+    market_generic = {tag_key(t) for t, count in rows[:GENERIC_TOP]
+                      if design and _share(count, report) >= GENERIC_SHARE}
+
+    def generic(tag: str) -> bool:
+        words = [_key(t) for t in _tokens(tag)]
+        key = tag_key(tag)
+        if design & set(words) or (len(words) < 2 and key not in wide_keys):
+            return False  # about the design; or one word, which is never a shop-wide tag
+        return (key in wide_keys or key in market_generic
+                or all(w in _SHAPE_WORDS or vocab.stem(w) in _SHAPE_WORDS for w in words))
+
+    others = [{tag_key(t) for t in tags if str(t).strip()} for tags in shop]
+    used: dict[str, int] = {}
+    for tags in others:
+        for key in tags:
+            used[key] = used.get(key, 0) + 1
+    shared = [len(have_keys & tags) for tags in others]
+
+    ranked: list[tuple[float, str, int]] = []
+    for raw, count in rows:
+        tag = clean_tag(raw)
+        if not tag or tag_key(tag) in have_keys or _clash(tag, have):
+            continue
+        if vocab.adhesive_claims(_tokens(tag)) - allowed:
+            continue
+        ranked.append((-count * 0.6 ** used.get(tag_key(tag), 0), tag, count))
+    room = max(0, GENERIC_SLOTS - sum(1 for t in have if generic(t)))
+
+    out: list[tuple[str, int]] = []
+    for _weight, tag, count in sorted(ranked):
+        key = tag_key(tag)
+        if _clash(tag, [*have, *(t for t, _c in out)]):
+            continue
+        if any(key in tags and shared[i] + 1 >= SHARED_TAGS_MIN
+               for i, tags in enumerate(others)):
+            continue
+        if generic(tag):
+            if room <= 0:
+                continue
+            room -= 1
+        for i, tags in enumerate(others):
+            if key in tags:
+                shared[i] += 1
+        out.append((tag, count))
+    return out
 
 
 def build_description(seed: Seed, template_description: str, title: str, *,
@@ -1100,14 +1476,17 @@ def generate(
     template_title: str = "",
     description_template: str | None = None,
     product_words: Sequence[str] = (),
+    template_materials: Sequence[str] = (),
+    taken_tags: Sequence[Sequence[str]] = (),
 ) -> Generated:
     """Produce the copy for one product, and say honestly how much evidence backed it.
 
-    The template's title, tags and description tell the builders what the product is
-    and which claims about it (size, material, brand) are the seller's own. With no
-    `description_template` saved, a description that still holds sentences about the
-    template's own design says so in the warnings (`product_words`: the template's
-    category names, see description.design_words).
+    The template's title, tags, materials and description tell the builders what the
+    product is and which claims about it (size, material, brand, how it goes on) are the
+    seller's own. With no `description_template` saved, a description that still holds
+    sentences about the template's own design says so in the warnings (`product_words`:
+    the template's category names, see description.design_words). `taken_tags` are the
+    tags of the drafts made before this one (see `build_tags`).
     """
     warnings: list[str] = []
     sources: list[str] = []
@@ -1121,7 +1500,7 @@ def generate(
             warnings=[seed.reason or "no product concept could be derived from the filename"],
         )
 
-    hint = hint_from(template_title, fallback_tags, template_description)
+    hint = hint_from(template_title, fallback_tags, template_description, template_materials)
     # What was searched: the concept, with the product when it does not say it.
     searched = str(getattr(report, "keyword", "") or "") or research_keyword(seed, hint)
     if report and not report.empty:
@@ -1138,11 +1517,14 @@ def generate(
         )
 
     title = build_title(seed, report, product_hint=hint)
-    tags = build_tags(seed, report, product_hint=hint)
+    tags = build_tags(seed, report, product_hint=hint, taken=taken_tags)
 
-    # Free slots take the template's tags that suit any design of its product, never
-    # the ones about its own design (product_tags).
-    if fill_tags(tags, product_tags(fallback_tags, template_title, seed)):
+    # A few of the template's own tags that suit any design of its product (never the
+    # ones about its own design, product_tags) are in the tags already; free slots take
+    # more of them.
+    template_keys = {tag_key(t) for t in fallback_tags or []}
+    fill_tags(tags, product_tags(fallback_tags, template_title, seed, hint=hint))
+    if any(tag_key(t) in template_keys for t in tags):
         sources.append("your template listing's tags")
 
     if len(tags) < MAX_TAGS:

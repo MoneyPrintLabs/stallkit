@@ -95,7 +95,7 @@ from .. import csvio, listings
 from ..config import LISTING_TYPES, MAX_LISTING_IMAGES, MAX_TAGS
 from ..errors import AuthError, AuthUnreachable, EtsyApiError, ValidationError
 from ..listings import DIGITAL_TYPES
-from ..seo import MarketReport
+from ..seo import MarketReport, tag_key
 from . import (
     automation,
     catalog,
@@ -490,7 +490,7 @@ class _Run:
         # The seller's own words about the product: what it is (a mug, a printable) and
         # which claims are theirs to make (generate.hint_from).
         self.hint = generate.hint_from(template.source_title, template.tags,
-                                       template.description)
+                                       template.description, template.materials)
         self.client = client
         self.mockups = mockups
         self.on_event = on_event
@@ -525,6 +525,15 @@ class _Run:
         self.state: dict = {}
         self.history: dict = {}
         self.history_file = automation.history_path(workspace.root)
+        # The tags the shop's other drafts carry, so these do not repeat them
+        # (generate.build_tags): the history's (read once, before the run adds to it), and
+        # each product's of this run, which a product reads only once every product before
+        # it has written its own, so the same folder gives the same tags however its
+        # products were scheduled.
+        self.prior_tags: list[list[str]] = []
+        self._tag_lists: dict[int, list[str]] = {}
+        self._settled: set[int] = set()
+        self._ledger = threading.Condition()
         # The shop's info images (read in run()), and each one's name by its picture.
         self.info: list[infoimages.InfoImage] = []
         self.info_names: dict[str, str] = {}
@@ -552,6 +561,7 @@ class _Run:
             self.state = automation.load_history(self.history_file)
             shop = None if self.dry_run else str(self.client.shop_id())
             self.history = automation.shop_history(self.state, shop)
+            self.prior_tags = automation.used_tags(self.history)
             groups = self.ws.product_groups()
             names = {path.name.casefold() for path, _ in groups}
             self.report.already_done, self.report.needs_review = automation.known_products(
@@ -809,6 +819,21 @@ class _Run:
             log.exception("preparing %s failed", item.name)
             step = next((s for s, state in item.steps.items() if state == RUNNING), "mockup")
             self._fail(item, Problem("internal", str(exc), step))
+        finally:
+            with self._ledger:
+                self._settled.add(item.index)
+                self._ledger.notify_all()
+
+    def _tags_so_far(self, item: StreamItem) -> list[list[str]]:
+        """The tags of the shop's earlier drafts: the history's, then those of the products
+        before this one in the folder, once each has been written (or can never be)."""
+        with self._ledger:
+            while not all(i in self._settled or i in self._tag_lists for i in range(item.index)):
+                if self._stopping():
+                    raise _Halted()
+                self._ledger.wait(0.2)
+            return [*self.prior_tags,
+                    *(self._tag_lists[i] for i in range(item.index) if i in self._tag_lists)]
 
     def _output_name(self, source: Path, template_image: Path | None) -> str:
         with self._lock:
@@ -1104,14 +1129,22 @@ class _Run:
 
         self._check_halt()
         self._step(item, "tags", RUNNING)
-        tags = generate.build_tags(item.seed, item.market, product_hint=self.hint)
-        # Free slots take the template's tags that suit any design of its product, not
+        taken = self._tags_so_far(item)
+        tags = generate.build_tags(item.seed, item.market, product_hint=self.hint,
+                                   **({"taken": taken} if taken else {}))
+        # A few of the template's own tags are in them already (the shop-wide kind, at most
+        # three); free slots take more of those that suit any design of its product, not
         # the ones about the template's own design (generate.product_tags).
         filler = generate.product_tags(self.template.tags, self.template.source_title,
-                                       item.seed)
-        if generate.fill_tags(tags, filler):
+                                       item.seed, hint=self.hint)
+        generate.fill_tags(tags, filler)
+        template_keys = {tag_key(t) for t in self.template.tags}
+        if any(tag_key(t) in template_keys for t in tags):
             item.evidence.append("your template listing's tags")
         item.tags = tags[:MAX_TAGS]
+        with self._ledger:
+            self._tag_lists[item.index] = list(item.tags)
+            self._ledger.notify_all()
         item.description = generate.build_description(
             item.seed, self.template.description, item.title,
             source_title=self.template.source_title,
@@ -1262,7 +1295,8 @@ class _Run:
         counts = {"images_total": total, "files_total": files_total}
         self._step(item, "draft", RUNNING, images_uploaded=0, files_uploaded=0, **counts)
         entry = {"status": "pending", "listing_id": None, "images_uploaded": 0,
-                 "files_uploaded": 0, "review_csv": str(self.csv_path), **counts}
+                 "files_uploaded": 0, "review_csv": str(self.csv_path),
+                 "tags": list(item.tags), **counts}
         if item.info:
             # Which of the pictures are the shop's info images: their names here, and
             # (the recorder, as each goes up) their Etsy image ids in "info_image_ids",

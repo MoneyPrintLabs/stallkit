@@ -570,6 +570,7 @@ def run(
     mockups: Sequence[Path] | None = None,
     watermark: bool = True,
     info_images: Sequence[infoimages.InfoImage] | None = None,
+    avoid_tags: Sequence[Sequence[str]] = (),
 ) -> DropReport:
     """Composite, research, write copy, and emit review.csv. Nothing is sent to Etsy.
 
@@ -587,6 +588,10 @@ def run(
     `info_images` end every row's images, after its own (default: the workspace's,
     drop.infoimages); a product folder gets the ones that fit (`infoimages.fitting`).
     They are never watermarked.
+
+    `avoid_tags` are the tags of drafts made before this run (the upload history's,
+    `automation.used_tags`); each row also avoids the tags of the rows before it, so a
+    batch of designs does not end up with one set of thirteen tags (`generate.build_tags`).
     """
     workspace.require()
     # download / both: every row also carries the files a buyer downloads.
@@ -683,7 +688,10 @@ def run(
     report.concepts = len(grouped)
     # What the template says the product is (generate.hint_from): the market search
     # names it too, so "dog dad paw print" on a shirt template searches shirts.
-    hint = generate.hint_from(template.source_title, template.tags, template.description)
+    hint = generate.hint_from(template.source_title, template.tags, template.description,
+                              template.materials)
+    # The tags of every draft before this one, the history's first, then this run's.
+    earlier_tags: list[list[str]] = [list(tags) for tags in avoid_tags]
 
     # Output names are handed out from one set per batch, so a collision between two
     # products is resolved rather than discovered later as a missing image.
@@ -752,8 +760,11 @@ def run(
             # The seller's description template, when saved (drop.description).
             description_template=template.description_template,
             product_words=template.category_path,
+            template_materials=template.materials,
+            taken_tags=earlier_tags,
         )
         row.title, row.tags = clean_title(copy.title), copy.tags
+        earlier_tags.append(list(copy.tags))
         row.description = copy.description
         row.evidence, row.warnings = copy.sources, list(copy.warnings)
         if digital and to_order and not row.files:

@@ -561,3 +561,158 @@ def test_research_reads_plain_words_from_escaped_titles(web):
     tags = [t["tag"] for t in data["tags"]]
     assert "mother's day" in tags and "mom's gift" in tags
     assert not any("39" in t or "amp" in t or "&#" in t for t in tags)
+
+
+# --- the checks that compare a listing with the others, and suggestions that follow the same rules ---
+
+SHOP_WIDE = ["peel and stick", "removable wallpaper", "self adhesive", "renter friendly",
+             "temporary wallpaper", "wallpaper mural", "self adhesive wall"]
+
+
+def _wallpaper(listing_id, title, own):
+    return _listing(listing_id, title, [*SHOP_WIDE, *own], materials=("vinyl",))
+
+
+def _wallpaper_shop():
+    fig = [f"fig {n}" for n in range(6)]
+    return [
+        _wallpaper(1000201, "Kitchen Wallpaper | Fig Tree Botanical | Peel and Stick", fig),
+        _wallpaper(1000202, "Fig Tree Wallpaper, Olive Branch Kitchen Wallpaper", fig),
+        _wallpaper(1000203, "Lemon Wallpaper, Citrus Kitchen", [f"lemon {n}" for n in range(6)]),
+        _wallpaper(1000204, "Moth Wallpaper, Gothic Bedroom", [f"moth {n}" for n in range(6)]),
+        _wallpaper(1000205, "Mushroom Wallpaper, Forest Bedroom", [f"fungi {n}" for n in range(6)]),
+    ]
+
+
+def _codes(item):
+    return {i["code"]: i for i in item["issues"]}
+
+
+def test_the_audit_flags_shared_and_generic_tags_and_a_generic_opening(web):
+    _connected(web, active=_wallpaper_shop())
+    data = web.client.get("/api/seo/audit").json()
+    items = {i["listing_id"]: i for i in data["items"]}
+
+    first = _codes(items[1000201])
+    # Same six tags of its own as listing 1000202, plus the seven every listing has.
+    assert first["tags.shared"]["severity"] == "warn"
+    assert first["tags.shared"]["params"]["other"] == 1000202
+    assert first["tags.shared"]["params"]["shared"] == 13
+    assert first["tags.generic"]["severity"] == "warn"
+    assert first["tags.generic"]["params"]["generic"] == 7
+    assert first["title.generic_opening"]["severity"] == "info"
+    assert first["title.generic_opening"]["params"]["lead"] == "Kitchen Wallpaper"
+    assert not items[1000201]["ready"]
+    assert {"tags.shared", "tags.generic", "title.generic_opening"} <= set(
+        items[1000201]["fix"]["manual"])
+
+    # The others only share the seven every listing carries, with the lowest id first.
+    third = _codes(items[1000203])
+    assert third["tags.shared"]["severity"] == "info"
+    assert third["tags.shared"]["params"]["other"] == 1000201
+    assert third["tags.shared"]["params"]["shared"] == 7
+    assert "title.generic_opening" not in third
+
+    # What the audit scored 100 before is no longer 100 for a shop of near copies.
+    assert data["average"] < 90
+    assert all(item["score"] < 100 for item in items.values())
+
+
+def test_a_shop_with_a_listing_of_its_own_tags_keeps_that_listing_clean(web):
+    own = _listing(1000301, "Lemon Wallpaper, Citrus Kitchen Wallpaper",
+                   [f"lemon tag {n}" for n in range(13)], materials=("vinyl",))
+    _connected(web, active=[*_wallpaper_shop(), own])
+    items = {i["listing_id"]: i for i in web.client.get("/api/seo/audit").json()["items"]}
+    codes = _codes(items[1000301])
+    assert "tags.shared" not in codes and "tags.generic" not in codes
+    assert items[1000301]["ready"] is True
+
+
+def test_research_for_a_listing_leaves_out_the_generic_tags_it_has_too_many_of(web):
+    fake = _connected(web, active=_wallpaper_shop())
+    rows = []
+    for i in range(100):
+        tags = []
+        if i < 62:
+            tags.append("nursery wallpaper")  # the market's most used, none of this design's words
+        if i < 50:
+            tags.append("lemon wallpaper")
+        if i < 30:
+            tags.append("citrus mural")
+        if i < 20:
+            tags.append("removable wallpaper")  # already on the listing
+        rows.append({"listing_id": 2000000 + i, "title": f"Lemon wallpaper {i}", "tags": tags,
+                     "price": {"amount": 2400, "divisor": 100, "currency_code": "USD"},
+                     "num_favorers": i})
+    fake.add("GET", "/listings/active", _search_route(rows))
+    web.client.get("/api/seo/audit")
+    data = web.client.get("/api/seo/research",
+                          params={"keyword": "lemon wallpaper", "listing_id": 1000203}).json()
+    # Seven of its 13 tags are the shop's already: "nursery wallpaper" would be one more.
+    assert [t["tag"] for t in data["tags"]] == ["lemon wallpaper", "citrus mural"]
+    assert "nursery wallpaper" not in data["add_now"] + data["needs_a_swap"]
+    # All thirteen slots are taken, so both are offered as swaps, not as additions.
+    assert data["add_now"] == [] and data["needs_a_swap"] == ["lemon wallpaper", "citrus mural"]
+    # Without a listing it is plain market research again: every tag, by use.
+    plain = web.client.get("/api/seo/research", params={"keyword": "lemon wallpaper"}).json()
+    assert [t["tag"] for t in plain["tags"]][:2] == ["nursery wallpaper", "lemon wallpaper"]
+
+
+def test_a_fix_rescores_the_listing_against_the_shop_it_sits_in(web):
+    fake = _connected(web, active=_wallpaper_shop())
+    sent: list[dict] = []
+
+    def patch(request: httpx.Request):
+        form = dict(urllib.parse.parse_qsl(request.content.decode("utf-8")))
+        sent.append(form)
+        row = dict(_wallpaper_shop()[0])
+        row.pop("images")
+        row["tags"] = form["tags"].split(",")
+        return row
+
+    fake.add("PATCH", f"{LISTINGS_PATH}/1000201", patch)
+    audit = web.client.get("/api/seo/audit").json()
+    before = next(i for i in audit["items"] if i["listing_id"] == 1000201)
+    assert "tags.shared" in _codes(before)
+
+    tags = [f"unique fig {n}" for n in range(13)]
+    resp = web.client.post("/api/seo/fix/1000201", json={"tags": tags, "confirm": True})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["before"] == before["score"], "scored against the shop it was audited in"
+    codes = _codes(data["item"])
+    assert "tags.shared" not in codes and "tags.generic" not in codes
+    assert data["item"]["score"] > before["score"]
+    # The other listing is no longer sharing anything with it.
+    again = {i["listing_id"]: i for i in web.client.get("/api/seo/audit").json()["items"]}
+    assert _codes(again[1000202])["tags.shared"]["params"]["other"] != 1000201
+
+
+def test_the_csv_report_scores_listings_with_the_shop_around_them(web):
+    _connected(web, active=_wallpaper_shop())
+    text = web.client.get("/api/seo/export.csv").content.decode("utf-8-sig")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    first = next(r for r in rows if r["listing_id"] == "1000201")
+    assert "1000202" in first["issues"] and int(first["score"]) < 100
+
+
+def test_every_issue_the_audit_can_raise_has_a_sentence_in_both_languages():
+    import json
+    import re
+    from pathlib import Path
+
+    from stallkit import seo as seo_module
+
+    codes = set(re.findall(r'Issue\(\s*"([a-z_]+\.[a-z_]+)"',
+                           Path(seo_module.__file__).read_text(encoding="utf-8")))
+    assert {"tags.shared", "tags.generic", "title.generic_opening", "title.missing"} <= codes
+    strings = json.loads((Path(seo_api.__file__).parents[1] / "static" / "i18n" / "seo.json")
+                         .read_text(encoding="utf-8"))
+    for code in sorted(codes):
+        if code.startswith("shop."):
+            continue
+        for lang in ("tr", "en"):
+            assert f"issue.{code}" in strings[lang], f"{code} has no {lang} sentence"
+    for lang in ("tr", "en"):
+        for key in ("issue.tags.shared", "issue.tags.generic"):
+            assert "{other}" in strings[lang][key] or "{generic}" in strings[lang][key]
