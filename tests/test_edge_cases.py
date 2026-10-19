@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from stallkit import orders
 from stallkit.client import MAX_IMAGE_BYTES, EtsyClient, _mime_for
 from stallkit.config import Config
 from stallkit.csvio import as_float, as_int
@@ -27,6 +28,27 @@ def test_a_fractional_quantity_is_rejected_not_rounded():
 def test_whole_numbers_written_as_floats_still_work():
     assert as_int("3.0", "quantity") == 3
     assert as_int("3", "quantity") == 3
+
+
+# --- a value that is not a number at all must be a validation error ----------
+
+# `float()` reads "nan", "inf" and "1e400" as numbers, but they are not numbers a
+# seller typed: int(nan) raises ValueError and int(inf) raises OverflowError, and
+# neither is a ValidationError, so they slipped past the per-row error handling and
+# took the whole batch down with a traceback.
+NOT_A_NUMBER = ("nan", "NaN", "-nan", "inf", "-inf", "Infinity", "1e400")
+
+
+def test_a_not_a_number_quantity_is_rejected_not_crashed():
+    for value in NOT_A_NUMBER:
+        with pytest.raises(ValidationError, match="whole number"):
+            as_int(value, "quantity")
+
+
+def test_a_not_a_number_price_is_rejected_not_crashed():
+    for value in NOT_A_NUMBER:
+        with pytest.raises(ValidationError, match="number"):
+            as_float(value, "price", minimum=0)
 
 
 # --- numeric lower bounds --------------------------------------------------
@@ -59,6 +81,34 @@ def test_a_negative_price_no_longer_passes_validation():
 def test_a_zero_price_is_rejected():
     with pytest.raises(ValidationError, match="greater than 0"):
         build_payload(dict(BASE, price="0"), is_update=False)
+
+
+def test_a_not_a_number_price_never_reaches_the_payload():
+    # NaN compares false against everything, so `price <= 0` did not catch it and the
+    # payload went out as {"price": NaN} — not valid JSON, and a 400 from Etsy that
+    # names no field.
+    with pytest.raises(ValidationError, match="price"):
+        build_payload(dict(BASE, price="nan"), is_update=False)
+
+
+def test_a_not_a_number_row_fails_the_row_not_the_whole_file(tmp_path):
+    prepared = prepare([dict(BASE, quantity="nan")], base_dir=tmp_path)
+    assert prepared[0].result.failed
+    assert "quantity" in prepared[0].result.message
+
+
+def test_a_not_a_number_receipt_fails_the_row_not_the_whole_batch():
+    report = orders.ship(
+        None,
+        [
+            {"receipt_id": "nan", "tracking_code": "1Z0001", "carrier_name": "UPS"},
+            {"receipt_id": "3000001", "tracking_code": "1Z0002", "carrier_name": "UPS"},
+        ],
+        dry_run=True,
+    )
+    assert len(report.results) == 2
+    assert report.errors == 1
+    assert report.results[1].status == "dry-run"
 
 
 def test_a_negative_quantity_no_longer_passes_validation():

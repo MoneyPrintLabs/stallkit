@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A cell holding a number that is not a number ("nan", "inf", "1e400") is now a
+  validation error instead of a crash. `float()` reads those as numbers, but
+  `int(nan)` raises ValueError and `int(inf)` OverflowError, and neither was a
+  validation error, so one malformed cell took the whole batch down with a traceback
+  rather than failing its own row — in `listings push`, in `orders ship` and in the
+  app's order import. A price of "nan" also reached Etsy as `{"price": NaN}`, which
+  is not valid JSON; the local check that catches every other nonsense price now
+  catches it too.
+
 ## [0.3.3] — 2026-10-04
 
 ### Changed

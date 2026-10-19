@@ -11,6 +11,7 @@ tag containing a comma survives a round trip through a spreadsheet.
 from __future__ import annotations
 
 import csv
+import math
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -108,7 +109,11 @@ def as_int(
         number = float(value)
     except ValueError as exc:
         raise ValidationError(f"{field} must be a whole number, got {value!r}") from exc
-    if number != int(number):
+    # "nan", "inf" and "1e400" are numbers to float() and nothing to a seller. They
+    # have to be refused here: int(nan) raises ValueError and int(inf) OverflowError,
+    # and neither is a ValidationError, so the row escaped the per-row error handling
+    # in listings.prepare and orders.ship and took the whole batch down instead.
+    if not math.isfinite(number) or number != int(number):
         raise ValidationError(f"{field} must be a whole number, got {value!r}")
     result = int(number)
     if minimum is not None and result < minimum:
@@ -144,6 +149,12 @@ def as_float(
         number = float(text)
     except ValueError as exc:
         raise ValidationError(f"{field} must be a number, got {value!r}") from exc
+    # NaN and the infinities are numbers to float() and nothing to a seller. NaN
+    # compares false against everything, so the `price > 0` check below let it
+    # through and the payload went out as {"price": NaN} — not valid JSON, and a
+    # 400 from Etsy that names no field.
+    if not math.isfinite(number):
+        raise ValidationError(f"{field} must be a number, got {value!r}")
     if minimum is not None and number < minimum:
         raise ValidationError(f"{field} must be {minimum} or more, got {number}")
     return number
