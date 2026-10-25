@@ -726,7 +726,7 @@ def test_print_plan_and_make_a_roll(web):
     plan = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50}).json()
     [item] = plan["items"]
     assert item["size"]["kind"] == "roll" and item["plan"]["width_px"] == 1150
-    assert item["plan"]["height_px"] == 2000 and item["plan"]["repeats"] == 10
+    assert item["plan"]["height_px"] == 2000 and item["plan"]["repeats"] == 29
     assert item["file"] == "1-roll-23x40in-traditional-x3.jpg" and item["made"] is False
     made = web.client.post(f"/api/orders/{rid}/print", json={"dpi": 50}).json()
     assert made["items"][0]["made"] is True
@@ -756,3 +756,14 @@ def test_parse_size_and_plan():
     assert pr.parse_size(["Traditional"]) is None
     big = pr.plan(pr.parse_size(["Mural 120×140 in"]), (1000, 1000))
     assert big.mode == "cover" and big.lowered and big.width_px * big.height_px <= pr.MAX_PIXELS * 1.01
+
+
+def test_a_roll_keeps_300_dpi_and_a_small_design_is_flagged_soft():
+    from stallkit.drop import production as pr
+    roll = pr.plan(pr.parse_size(["1 Roll 23×160 in"]), (1254, 1254), dpi=300)
+    assert (roll.width_px, roll.height_px, roll.dpi, roll.lowered) == (6900, 48000, 300, False)
+    assert roll.to_dict()["soft"] is True
+    sharp = pr.plan(pr.parse_size(["1 Roll 23×160 in"]), (2300, 2300), dpi=300, repeats=3)
+    assert sharp.to_dict()["soft"] is False
+    mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=300)
+    assert mural.lowered and mural.dpi < 100

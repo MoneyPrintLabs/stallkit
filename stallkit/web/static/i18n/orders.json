@@ -143,7 +143,9 @@
     "print.problem.no_print_file": "İlanın baskı dosyası yok: ilanın sayfasından ekleyin",
     "print.problem.no_listing": "İlan bulunamadı",
     "print.problem.unreadable": "Baskı dosyası okunamadı",
-    "errors.nothing_to_print": "Bu siparişte henüz hazırlanabilecek ürün yok."
+    "errors.nothing_to_print": "Bu siparişte henüz hazırlanabilecek ürün yok.",
+    "print.quality": "Baskı kalitesi",
+    "print.soft": "Tasarım {x} kat büyütülüyor: bu çözünürlükte bulanık basılır, daha büyük tasarım isteyin"
   },
   "en": {
     "title": "Orders",
@@ -289,6 +291,8 @@
     "print.problem.no_print_file": "The listing has no print file: add it on the listing's page",
     "print.problem.no_listing": "Listing not found",
     "print.problem.unreadable": "The print file cannot be read",
-    "errors.nothing_to_print": "No item of this order can be made yet."
+    "errors.nothing_to_print": "No item of this order can be made yet.",
+    "print.quality": "Print quality",
+    "print.soft": "The design is enlarged {x}×: it prints soft at this resolution, get a larger design"
   }
 }

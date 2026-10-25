@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the roll's width, so rolls hang side by side without a step; a mural covers the whole
     wall (made at a lower dpi if it would not fit in memory, and it says so). A design whose
     opposite edges do not meet is flagged, since a line would show where it repeats.
+    The dialog offers 150 or 300 dpi (a 23×160 in roll at 300 dpi is 6900×48000 px; a mural
+    goes to a lower dpi to fit in memory and says so), keeps the pattern the same size at
+    both, and flags a design that must be enlarged more than 1.5× (it would print soft).
     Nothing is sent to Etsy (`GET/POST /api/orders/{id}/print`, `drop/production.py`).
 
 ## [0.3.3] — 2026-10-04

@@ -22,6 +22,7 @@ import {
   pagination,
   progressBar,
   searchInput,
+  select,
   table,
   tabs,
   thumb,
@@ -508,7 +509,15 @@ export default {
         onClick: () => ctx.api.post(`/api/orders/${row.receipt_id}/print/open`).catch((err) => ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) })),
       });
       modal({ title: t("print.title", { id: row.receipt_id }), subtitle: t("print.sub"), body, width: 560, actions: [folderBtn, makeBtn] });
-      const dpi = 150;
+      let dpi = 150;
+      const dpiSel = select({
+        value: "150",
+        options: [{ value: "150", label: "150 dpi" }, { value: "300", label: "300 dpi" }],
+        onChange: (v) => {
+          dpi = Number(v);
+          load();
+        },
+      });
       function show(d) {
         const lines = d.items.map((it) => {
           const bits = [];
@@ -518,17 +527,24 @@ export default {
             if (it.plan.lowered) bits.push(t("print.lowered", { dpi: it.plan.dpi }));
           }
           const seamBad = it.seam && !it.seam.ok;
-          const warn = it.problem ? t(`print.problem.${it.problem}`) : seamBad ? t("print.seam", { a: it.seam.across, b: it.seam.down }) : "";
+          const soft = it.plan && it.plan.soft;
+          const warn = it.problem
+            ? t(`print.problem.${it.problem}`)
+            : seamBad
+              ? t("print.seam", { a: it.seam.across, b: it.seam.down })
+              : soft
+                ? t("print.soft", { x: it.plan.upscale })
+                : "";
           return h(
             "div",
-            { class: cx("o-print-item", (it.problem || seamBad) && "is-warn") },
+            { class: cx("o-print-item", (it.problem || seamBad || soft) && "is-warn") },
             h("strong", null, `${it.quantity}× ${it.size ? it.size.label : it.title}`, it.material ? ` · ${it.material}` : ""),
             h("span", { class: "muted" }, bits.join(" · ") || "–"),
             warn ? h("span", { class: "o-print-warn" }, icon("alert", { size: 12 }), warn) : null,
             it.made ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), it.file) : null,
           );
         });
-        mount(body, lines.length ? lines : h("p", { class: "muted" }, t("print.none")));
+        mount(body, h("div", { class: "o-print-dpi" }, h("span", { class: "muted" }, t("print.quality")), dpiSel), lines.length ? lines : h("p", { class: "muted" }, t("print.none")));
         makeBtn.disabled = !d.ready;
       }
       async function make() {
@@ -542,11 +558,14 @@ export default {
           ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) });
         }
       }
-      try {
-        show(await ctx.api.get(`/api/orders/${row.receipt_id}/print`, { dpi }, { signal: ctx.signal }));
-      } catch (err) {
-        mount(body, h("p", { class: "o-print-warn" }, ctx.api.errorText(err, t)));
+      async function load() {
+        try {
+          show(await ctx.api.get(`/api/orders/${row.receipt_id}/print`, { dpi }, { signal: ctx.signal }));
+        } catch (err) {
+          mount(body, h("p", { class: "o-print-warn" }, ctx.api.errorText(err, t)));
+        }
       }
+      await load();
     }
 
     function renderBuyer(row) {

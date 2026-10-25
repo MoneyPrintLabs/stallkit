@@ -37,6 +37,11 @@ ROLL_WIDTH_IN = 23.0
 # Above this many pixels a file is made at a lower dpi (a 120×140 in mural at 150 dpi is
 # 378 million pixels, more than a desktop holds comfortably).
 MAX_PIXELS = 120_000_000
+# A repeating roll holds more: a 23×160 in roll at 300 dpi is 331 million pixels (about
+# 1 GB in memory), the file a printer takes for it.
+MAX_PATTERN_PIXELS = 360_000_000
+# A design enlarged more than this to fill its file prints soft.
+UPSCALE_WARN = 1.5
 JPEG_LIMIT = 65_000  # JPEG's own limit is 65535 px a side
 # A tile whose own edges differ from its inside this many times over shows a line where
 # it repeats (about 1 for a seamless tile).
@@ -166,14 +171,16 @@ class Plan:
     height_px: int
     repeats: int = 0  # pattern: how many times the tile spans a roll's width
     span_px: int = 0  # pattern: that width (a roll's), which `repeats` tiles fill exactly
-    lowered: bool = False  # a mural made at a lower dpi to fit in memory
+    lowered: bool = False  # a file made at a lower dpi to fit in memory
+    upscale: float = 1.0  # how much the design is enlarged to fill the file
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {"mode": self.mode, "dpi": self.dpi, "width_px": self.width_px,
                 "height_px": self.height_px, "repeats": self.repeats,
                 "repeat_px": round(self.span_px / self.repeats) if self.repeats else 0,
-                "lowered": self.lowered,
+                "lowered": self.lowered, "upscale": round(self.upscale, 2),
+                "soft": self.upscale > UPSCALE_WARN,
                 "width_cm": round(self.width_px / self.dpi * 2.54, 1),
                 "height_cm": round(self.height_px / self.dpi * 2.54, 1)}
 
@@ -193,8 +200,9 @@ def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
     mode = mode or ("cover" if size.kind == "mural" else "pattern")
     notes: list[str] = []
     lowered = False
-    if size.width_in * size.height_in * dpi * dpi > MAX_PIXELS:
-        dpi = max(MIN_DPI, int(math.sqrt(MAX_PIXELS / (size.width_in * size.height_in))))
+    limit = MAX_PATTERN_PIXELS if mode == "pattern" else MAX_PIXELS
+    if size.width_in * size.height_in * dpi * dpi > limit:
+        dpi = max(MIN_DPI, int(math.sqrt(limit / (size.width_in * size.height_in))))
         lowered = True
     width_px = min(JPEG_LIMIT, round(size.width_in * dpi))
     height_px = min(JPEG_LIMIT, round(size.height_in * dpi))
@@ -202,9 +210,14 @@ def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
     if mode == "pattern":
         # A roll's repeat spans its own width; anything else is shown at a roll's repeat.
         roll_px = width_px if size.kind == "roll" else round(roll_width_in * dpi)
-        count = repeats_for(tile_size[0], roll_px, repeats)
+        # The repeat count is the same at every dpi (chosen at the default one), so the
+        # pattern looks the same size on the wall at 150 and at 300 dpi.
+        count = repeats_for(tile_size[0], round(roll_width_in * DEFAULT_DPI), repeats)
         result.repeats = count
         result.span_px = roll_px
+        result.upscale = (roll_px / count) / max(1, tile_size[0])
+    else:
+        result.upscale = max(width_px / max(1, tile_size[0]), height_px / max(1, tile_size[1]))
     return result
 
 

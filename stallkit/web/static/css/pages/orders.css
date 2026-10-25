@@ -779,6 +779,13 @@
   display: grid;
   gap: 10px;
 }
+.o-print-dpi {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+}
 .o-print-item {
   display: grid;
   gap: 3px;
