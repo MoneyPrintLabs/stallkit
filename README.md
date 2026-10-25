@@ -121,9 +121,9 @@ After that there is one thing to do each time: drop your designs.
 |---|---|
 | **Panel** (Dashboard) | Your shop today: active listings, drafts, orders to ship, average SEO score, this month's revenue, and Etsy requests left for today. |
 | **Tasarım Yükle** (Upload designs) | Drag in PNG or JPG designs, or folders of finished photos. Each design goes through six steps: mockups, Etsy search research, a title of up to 140 characters, 13 tags, a check against Etsy's rules, and a draft on Etsy. Physical products and [digital downloads](#digital-products) both work. The **Başlat** (*Start*) window lets you pick the **Mağaza bölümü** (*Shop section*) for the whole batch; it starts on the template listing's and remembers your last choice. |
-| **İlanlar** (Listings) | Your drafts and live listings. Open a draft to check or edit its title, tags and description, then publish the ones you want. You can also download listings as a CSV or update them from one. |
+| **İlanlar** (Listings) | Your drafts and live listings. Open a draft to check or edit its title, tags and description, then publish the ones you want. You can also download listings as a CSV or update them from one. Each listing shows whether its **print file** (the design an order is printed from) is on your computer; **Filtrele** lists the ones without, and on a listing's page you drop or pick the file to keep it. |
 | **SEO** | Every listing scored out of 100, weakest first, with what to improve. Includes tag research for any keyword. **Fix** sends the suggested change. |
-| **Siparişler** (Orders) | Orders waiting to ship, shipped and delivered. Type tracking numbers or load them from a CSV, then send them to Etsy. |
+| **Siparişler** (Orders) | Orders waiting to ship, shipped and delivered. Type tracking numbers or load them from a CSV, then send them to Etsy. An order waiting to ship whose listing has no print file says *Baskı dosyası yok* (No print file). |
 | **Kâr-Zarar** (Profit & loss) | Revenue, Etsy fees from your payment account, the product and shipping costs you enter, and net profit, month by month, in your shop's currency and in TRY. |
 | **Pinterest** | Optional. Queue Pins of your live listings and post a few a day on your own Pinterest account. |
 | **Mockuplar** (Mockups) | Add photos of the products you sell and set where the design sits on each one (the print area): a rectangle, or four corners for a surface seen at an angle. **Gerçekçilik** (*realism*) lets the design take the photo's light, folds and fabric texture, and **Kavis** (*curve*) wraps it round a mug. One setting can cover every mockup of the same size. |
@@ -319,7 +319,7 @@ The terminal shows the address. Press **Ctrl+C** there to stop the app.
 |---|---|
 | Etsy keys (`.env`), Etsy sign-in (`token.json`), settings, logs | `~/.stallkit` (on Windows `%USERPROFILE%\.stallkit`) |
 | A second or third shop | `~/.stallkit/shops/<id>/` |
-| Products folder: `1-MOCKUPS`, `2-PRODUCTS` (your designs), `3-DRAFTS`, `product.json` (the template), `info-images` (the pictures every draft ends with) | `Etsy Studio` on your Desktop (`Etsy Studio - <shop id>` for further shops). You can change it in **Ayarlar**. |
+| Products folder: `1-MOCKUPS`, `2-PRODUCTS` (your designs), `3-DRAFTS`, `product.json` (the template), `info-images` (the pictures every draft ends with), `print-files/<listing id>` (each listing's print file; every draft keeps a copy of its design there) | `Etsy Studio` on your Desktop (`Etsy Studio - <shop id>` for further shops). You can change it in **Ayarlar**. |
 
 If you choose `1-MOCKUPS`, `2-PRODUCTS` or `3-DRAFTS` (or a folder inside them) as the
 products folder, stallkit uses the products folder they belong to and says so, instead of
@@ -474,9 +474,9 @@ ilan seçersiniz. Sonrasında her seferinde tek bir iş kalır: tasarımlarını
 |---|---|
 | **Panel** | Mağazanızın bugünü: aktif ilanlar, taslaklar, kargolanacak siparişler, ortalama SEO puanı, bu ayın geliri ve bugün kalan Etsy istek hakkı. |
 | **Tasarım Yükle** | PNG ya da JPG tasarımları veya hazır fotoğraf klasörlerini sürükleyip bırakın. Her tasarım altı adımdan geçer: mockup, Etsy aramasında araştırma, en fazla 140 karakterlik başlık, 13 etiket, Etsy kurallarına göre kontrol ve Etsy'de taslak. Fiziksel ürünler de [dijital ürünler](#dijital-ürünler) de olur. **Başlat** penceresinde partinin **Mağaza bölümü**nü seçersiniz; şablon ilanınkiyle başlar ve son seçiminizi hatırlar. |
-| **İlanlar** | Taslak ve yayındaki ilanlarınız. Bir taslağı açıp başlığını, etiketlerini ve açıklamasını kontrol edebilir, düzenleyebilir, sonra istediklerinizi yayınlayabilirsiniz. İlanları CSV olarak indirebilir ya da CSV'den güncelleyebilirsiniz. |
+| **İlanlar** | Taslak ve yayındaki ilanlarınız. Bir taslağı açıp başlığını, etiketlerini ve açıklamasını kontrol edebilir, düzenleyebilir, sonra istediklerinizi yayınlayabilirsiniz. İlanları CSV olarak indirebilir ya da CSV'den güncelleyebilirsiniz. Her ilan, **baskı dosyasının** (siparişin basıldığı tasarım) bilgisayarınızda olup olmadığını gösterir; **Filtrele** dosyası olmayanları listeler, ilanın sayfasında dosyayı bırakıp ya da seçip saklarsınız. |
 | **SEO** | Her ilan 100 üzerinden puanlanır, en zayıf en üstte; neyin iyileşeceği yazar. Herhangi bir kelime için etiket araştırması da vardır. **Düzelt** önerilen değişikliği gönderir. |
-| **Siparişler** | Kargo bekleyen, kargoya verilen ve teslim edilen siparişler. Takip numaralarını yazın ya da CSV'den yükleyin, sonra Etsy'ye gönderin. |
+| **Siparişler** | Kargo bekleyen, kargoya verilen ve teslim edilen siparişler. Takip numaralarını yazın ya da CSV'den yükleyin, sonra Etsy'ye gönderin. İlanının baskı dosyası olmayan, kargo bekleyen sipariş *Baskı dosyası yok* der. |
 | **Kâr-Zarar** | Gelir, ödeme hesabınızdaki Etsy kesintileri, sizin girdiğiniz ürün ve kargo maliyetleri ve net kâr; ay ay, mağazanızın para biriminde ve TL olarak. |
 | **Pinterest** | İsteğe bağlı. Yayındaki ilanlarınızın pinlerini sıraya alın, kendi Pinterest hesabınızda günde birkaç tane paylaşılsın. |
 | **Mockuplar** | Sattığınız ürünlerin fotoğraflarını ekleyin, tasarımın her birinde nereye oturacağını (baskı alanı) ayarlayın. Tek ayar aynı ölçüdeki tüm mockup'lara uygulanabilir. |
@@ -666,7 +666,7 @@ Adres terminalde görünür; durdurmak için orada **Ctrl+C**'ye basın.
 |---|---|
 | Etsy anahtarları (`.env`), Etsy oturumu (`token.json`), ayarlar, kayıtlar | `~/.stallkit` (Windows'ta `%USERPROFILE%\.stallkit`) |
 | İkinci, üçüncü mağaza | `~/.stallkit/shops/<id>/` |
-| Ürün klasörü: `1-MOCKUPS`, `2-PRODUCTS` (tasarımlarınız), `3-DRAFTS`, `product.json` (şablon), `info-images` (her taslağın sonundaki görseller) | Masaüstünüzde `Etsy Studio` (diğer mağazalar için `Etsy Studio - <mağaza id>`). **Ayarlar**'dan değiştirebilirsiniz. |
+| Ürün klasörü: `1-MOCKUPS`, `2-PRODUCTS` (tasarımlarınız), `3-DRAFTS`, `product.json` (şablon), `info-images` (her taslağın sonundaki görseller), `print-files/<ilan no>` (her ilanın baskı dosyası; her taslak tasarımının bir kopyasını burada tutar) | Masaüstünüzde `Etsy Studio` (diğer mağazalar için `Etsy Studio - <mağaza id>`). **Ayarlar**'dan değiştirebilirsiniz. |
 
 Ürün klasörü olarak `1-MOCKUPS`, `2-PRODUCTS` ya da `3-DRAFTS`'ı (veya bunların içindeki
 bir klasörü) seçerseniz stallkit, ilkinin içine ikinci bir ürün klasörü açmak yerine

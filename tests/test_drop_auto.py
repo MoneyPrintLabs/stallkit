@@ -273,6 +273,9 @@ def test_drop_auto_attaches_a_loose_designs_original_file(studio):
     assert report.uploaded.results[0].status == "ok"
     assert client.files == [("mountain sunset shirt.png", 1)]
     assert "shipping_profile_id" not in client.fields[0]
+    # The design is kept as the listing's print file, under its listing id.
+    kept = ws.root / "print-files" / "900" / "mountain sunset shirt.png"
+    assert kept.read_bytes() == (ws.products / "mountain sunset shirt.png").read_bytes()
 
 
 def test_a_file_that_fails_after_the_create_is_partial_and_not_recreated(studio):

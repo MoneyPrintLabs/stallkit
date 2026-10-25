@@ -716,3 +716,87 @@ def test_import_images_inside_the_workspace_are_found(web):
     missing = web.client.post("/api/listings/import",
                               content=csv_body([_import_row("2-PRODUCTS/nope.png")])).json()
     assert "image not found" in missing["results"][0]["message"]
+
+
+# --- print files ---------------------------------------------------------------------------
+
+
+def png_bytes(size=(60, 30)) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", size, "white").save(out, format="PNG")
+    return out.getvalue()
+
+
+def test_print_files_in_the_table_and_its_filter(web):
+    listings = [make(1), make(2), make(3), make(4, type="download")]
+    Shop(web, listings)
+    root = history(web, {"retro-mountain-sunset.png": {"status": "ok", "listing_id": 1000001}})
+    # A draft stallkit made before print files: its design is still in 2-PRODUCTS.
+    Image.new("RGB", (32, 32), "white").save(root / "2-PRODUCTS" / "retro-mountain-sunset.png")
+    data = web.client.get("/api/listings", params={"tab": "draft", "sort": "title"}).json()
+    by_id = {r["id"]: r["print_file"] for r in data["items"]}
+    assert by_id == {1000001: True, 1000002: False, 1000003: False, 1000004: None}
+    assert (root / "print-files" / "1000001" / "retro-mountain-sunset.png").is_file()
+    assert data["prints"] == {"missing": 2, "present": 1}
+    missing = web.client.get("/api/listings", params={"tab": "draft", "print": "missing"}).json()
+    assert sorted(r["id"] for r in missing["items"]) == [1000002, 1000003]
+    present = web.client.get("/api/listings", params={"tab": "draft", "print": "present"}).json()
+    assert [r["id"] for r in present["items"]] == [1000001]
+    bad = web.client.get("/api/listings", params={"print": "maybe"})
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "invalid"
+
+
+def test_add_a_print_file_on_the_listing_page(web):
+    shop = shop_with(web, drafts=1, active=1, inactive=0)
+    detail = web.client.get("/api/listings/1000101").json()["print_files"]
+    assert detail["needed"] is True and detail["files"] == []
+    assert detail["folder"] == "print-files/1000101"
+    data = png_bytes()
+    resp = web.client.put("/api/listings/1000101/print-files", params={"name": "leopard tile.png"},
+                          content=data)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["file"], body["duplicate"]) == ("leopard tile.png", False)
+    [kept] = body["print_files"]["files"]
+    assert (kept["rel"], kept["width"], kept["height"], kept["thumb"]) == (
+        "print-files/1000101/leopard tile.png", 60, 30, True)
+    again = web.client.put("/api/listings/1000101/print-files", params={"name": "leopard tile.png"},
+                           content=data).json()
+    assert again["duplicate"] is True and len(again["print_files"]["files"]) == 1
+    detail = web.client.get("/api/listings/1000101").json()["print_files"]
+    assert [f["name"] for f in detail["files"]] == ["leopard tile.png"]
+    row = web.client.get("/api/listings", params={"tab": "active"}).json()["items"][0]
+    assert row["print_file"] is True
+    # Nothing of this reaches Etsy.
+    assert not [c for c in shop.fake.calls if c[0] in ("PUT", "POST", "PATCH")]
+
+
+@pytest.mark.parametrize("name, content, code", [
+    ("setup.exe", b"MZ", "not_print_file"),
+    ("tile.png", b"", "invalid"),
+])
+def test_a_print_file_is_checked(web, name, content, code):
+    shop_with(web, drafts=1, active=0, inactive=0)
+    resp = web.client.put("/api/listings/1000001/print-files", params={"name": name}, content=content)
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == code
+    root = web.ctx.workspace().root
+    assert not (root / "print-files" / "1000001").exists() or not any(
+        (root / "print-files" / "1000001").iterdir())
+
+
+def test_a_print_file_over_the_limit_is_refused(web, monkeypatch):
+    shop_with(web, drafts=1, active=0, inactive=0)
+    monkeypatch.setattr(listings_api, "PRINT_UPLOAD_MAX", 10)
+    resp = web.client.put("/api/listings/1000001/print-files", params={"name": "tile.png"},
+                          content=png_bytes())
+    assert resp.status_code == 413 and resp.json()["error"]["code"] == "too_large"
+
+
+def test_open_the_print_folder(web, monkeypatch):
+    shop_with(web, drafts=1, active=0, inactive=0)
+    opened = []
+    monkeypatch.setattr(listings_api.files, "open_path", opened.append)
+    resp = web.client.post("/api/listings/1000001/print-files/open")
+    assert resp.status_code == 200
+    root = web.ctx.workspace().root
+    assert opened == [root / "print-files" / "1000001"] and opened[0].is_dir()

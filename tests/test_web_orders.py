@@ -682,3 +682,17 @@ def test_shipped_this_month_says_when_it_stopped_counting(web, monkeypatch):
     setup_orders(web, [make_receipt(n, shipped=True) for n in range(1, 5)])
     data = web.client.get("/api/orders/summary").json()
     assert data["shipped_month"] == 2 and data["shipped_month_partial"] is True
+
+
+def test_each_item_says_whether_its_print_file_is_kept(web):
+    receipts = [make_receipt(1), make_receipt(2), make_receipt(3)]
+    receipts[2]["transactions"][0]["is_digital"] = True
+    setup_orders(web, receipts)
+    root = web.ctx.workspace().root
+    kept = root / "print-files" / "1000001"
+    kept.mkdir(parents=True)
+    (kept / "poster.pdf").write_bytes(b"%PDF-1.4 example")
+    rows = web.client.get("/api/orders", params={"tab": "all"}).json()["rows"]
+    by_receipt = {r["receipt_id"]: r["items"][0]["print_file"] for r in rows}
+    assert by_receipt == {3000001: True, 3000002: False, 3000003: None}
+    assert all("_digital" not in r["items"][0] for r in rows)

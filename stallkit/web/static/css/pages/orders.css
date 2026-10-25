@@ -736,3 +736,25 @@
     width: 100%;
   }
 }
+
+/* An order to make whose listing has no print file kept (drop/printfiles): a mark on
+   the product's picture. */
+.page-orders .o-thumb-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.page-orders .o-noprint {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  color: #1a1206;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--panel);
+  cursor: help;
+}

@@ -155,7 +155,12 @@
     "errors.csv_encoding": "Dosya okunamadı. Excel'de \"CSV UTF-8\" olarak kaydedip tekrar deneyin.",
     "errors.csv_columns": "Bu bir ilan CSV'si değil: listing_id ya da title sütunu yok.",
     "errors.import_expired": "Kontrolün süresi doldu. Dosyayı yeniden seçin.",
-    "errors.import_invalid": "{n} satır hatalı, hiçbir şey gönderilmedi."
+    "errors.import_invalid": "{n} satır hatalı, hiçbir şey gönderilmedi.",
+    "filter.print": "Baskı dosyası",
+    "filter.print_missing": "Yok",
+    "filter.print_present": "Var",
+    "print.missing": "baskı dosyası yok",
+    "print.missing_tip": "Bu ilanın tasarımı bilgisayarda yok: sipariş gelirse basılamaz. İlanı açıp dosyayı ekleyin."
   },
   "en": {
     "title": "Listings",
@@ -313,6 +318,11 @@
     "errors.csv_encoding": "The file could not be read. Save it as \"CSV UTF-8\" and try again.",
     "errors.csv_columns": "This is not a listings CSV: there is no listing_id or title column.",
     "errors.import_expired": "The check has expired. Choose the file again.",
-    "errors.import_invalid": "{n} rows are invalid; nothing was sent."
+    "errors.import_invalid": "{n} rows are invalid; nothing was sent.",
+    "filter.print": "Print file",
+    "filter.print_missing": "Missing",
+    "filter.print_present": "Kept",
+    "print.missing": "no print file",
+    "print.missing_tip": "This listing's design is not on this computer: an order of it cannot be printed. Open the listing to add the file."
   }
 }

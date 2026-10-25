@@ -33,6 +33,7 @@ import { ROUTES } from "../app.js";
 const TABS = ["draft", "active", "all"];
 const SORTS = ["updated", "seo", "title", "price"];
 const SEO_BANDS = ["high", "mid", "low"];
+const PRINT_FILTERS = ["missing", "present"];
 const STATE_TONE = { draft: "warning", active: "success", inactive: "muted", expired: "danger", sold_out: "neutral" };
 const NAV_KEY = "stallkit.listings.nav";
 const MAX_TAGS = 13;
@@ -81,6 +82,7 @@ export default {
       sort: SORTS.includes(q0.sort) ? q0.sort : "updated",
       type: q0.type || "",
       seo: SEO_BANDS.includes(q0.seo) ? q0.seo : "",
+      print: PRINT_FILTERS.includes(q0.print) ? q0.print : "",
       page: Math.max(1, parseInt(q0.page, 10) || 1),
       perPage: fittingRows(),
       data: null,
@@ -184,6 +186,7 @@ export default {
                 { class: "cell-sub" },
                 h("span", { class: "lst-type" }, typeLabel(r.type, r.type_name)),
                 r.source ? [h("span", { class: "lst-dot", "aria-hidden": "true" }, "·"), h("span", { class: "mono lst-file", title: r.source }, r.source)] : null,
+                r.print_file === false ? [h("span", { class: "lst-dot", "aria-hidden": "true" }, "·"), h("span", { class: "lst-noprint", title: t("print.missing_tip") }, icon("alert", { size: 12 }), t("print.missing"))] : null,
               ),
             ),
         },
@@ -292,6 +295,7 @@ export default {
         sort: st.sort === "updated" ? null : st.sort,
         type: st.type || null,
         seo: st.seo || null,
+        print: st.print || null,
         page: st.page > 1 ? st.page : null,
       });
     }
@@ -312,7 +316,7 @@ export default {
     }
 
     function filterCount() {
-      return (st.type ? 1 : 0) + (st.seo ? 1 : 0);
+      return (st.type ? 1 : 0) + (st.seo ? 1 : 0) + (st.print ? 1 : 0);
     }
 
     function updateFilterBtn() {
@@ -329,7 +333,7 @@ export default {
     }
 
     function emptyNode() {
-      const filtered = st.q || st.type || st.seo;
+      const filtered = st.q || st.type || st.seo || st.print;
       if (filtered) {
         return emptyState({
           icon: "search",
@@ -355,6 +359,7 @@ export default {
       search.value = "";
       st.type = "";
       st.seo = "";
+      st.print = "";
       st.page = 1;
       syncQuery();
       load();
@@ -422,6 +427,7 @@ export default {
             sort: st.sort,
             type: st.type || undefined,
             seo: st.seo || undefined,
+            print: st.print || undefined,
             page: st.page,
             per_page: st.perPage,
             refresh: refresh ? 1 : undefined,
@@ -530,6 +536,23 @@ export default {
           load();
         },
       });
+      // Baskı dosyası: the listings an order of which could not be printed (drop/printfiles).
+      const counts = (st.data && st.data.prints) || {};
+      const printChips = chips({
+        items: [
+          { id: "", label: t("filter.all") },
+          { id: "missing", label: t("filter.print_missing"), count: counts.missing ?? null },
+          { id: "present", label: t("filter.print_present"), count: counts.present ?? null },
+        ],
+        value: st.print,
+        ariaLabel: t("filter.print"),
+        onChange: (id) => {
+          st.print = id;
+          st.page = 1;
+          syncQuery();
+          load();
+        },
+      });
       const pop = popover(
         filterBtn,
         h(
@@ -539,6 +562,8 @@ export default {
           types.length ? typeChips.el : h("p", { class: "muted lst-filter-none" }, t("filter.no_types")),
           h("p", { class: "lst-filter-label" }, t("filter.seo")),
           seoChips.el,
+          h("p", { class: "lst-filter-label" }, t("filter.print")),
+          printChips.el,
           h(
             "div",
             { class: "lst-filter-foot" },
@@ -551,6 +576,7 @@ export default {
                 if (pop) pop.close();
                 st.type = "";
                 st.seo = "";
+                st.print = "";
                 st.page = 1;
                 syncQuery();
                 load();

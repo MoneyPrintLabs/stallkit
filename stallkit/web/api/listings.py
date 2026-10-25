@@ -1,7 +1,8 @@
 """İlanlar (the listings table) and the listing detail page.
 
     GET   /api/listings                 one page of a tab, with counts, filters and ids
-    GET   /api/listings/{id}            one listing: images, SEO audit, category, source file
+    GET   /api/listings/{id}            one listing: images, SEO audit, category, source file,
+                                        print files
     PATCH /api/listings/{id}            edit title / tags / description
     POST  /api/listings/{id}/publish    publish one draft
     POST  /api/listings/publish         publish many drafts (job "publish")
@@ -9,6 +10,8 @@
     GET   /api/listings/template.csv    the same columns, no rows
     POST  /api/listings/import          check a CSV (raw body); nothing is sent to Etsy
     POST  /api/listings/import/apply    send a checked CSV to Etsy (job "listings-import")
+    PUT   /api/listings/{id}/print-files?name=   add a print file (raw body; local only)
+    POST  /api/listings/{id}/print-files/open    show the listing's print-file folder
 
 Every write to a live listing needs `"confirm": true` in its body: the page asks the
 seller first, and the server refuses a write that skipped the question.
@@ -49,6 +52,7 @@ STATES = ("draft", "active", "inactive", "sold_out", "expired")
 TABS: dict[str, tuple[str, ...]] = {"draft": ("draft",), "active": ("active",), "all": STATES}
 SORTS = ("updated", "seo", "title", "price")
 SEO_BANDS = ("high", "mid", "low")
+PRINT_FILTERS = ("missing", "present")
 CACHE_TTL = 120.0
 # A shop with more listings than this in one state is shown in part (flagged `truncated`).
 MAX_PER_STATE = 3000
@@ -62,6 +66,9 @@ EDIT_URL = "https://www.etsy.com/your/shops/me/listing-editor/edit/{id}"
 TAXONOMY_TTL = 30 * 24 * 3600
 IMPORT_TTL = 30 * 60
 MAX_CSV_BYTES = 5 * 1024 * 1024
+# A print file added on the page comes as one request body, which the server caps at
+# 100 MB (server.MAX_BODY); a larger one is copied into its folder by hand.
+PRINT_UPLOAD_MAX = 100 * 1024 * 1024 - 64 * 1024
 # ShopListing (OAS) has url and num_favorers but no view count, so there is no "views".
 EXPORT_COLUMNS = listings_mod.LISTING_COLUMNS + ["url", "num_favorers"]
 
@@ -86,6 +93,8 @@ def register(r: Router, ctx: AppContext) -> None:
     r.get("/api/listings/{id:int}", one_listing)
     r.patch("/api/listings/{id:int}", edit_listing)
     r.post("/api/listings/{id:int}/publish", publish_one)
+    r.put("/api/listings/{id:int}/print-files", add_print_file)
+    r.post("/api/listings/{id:int}/print-files/open", open_print_folder)
 
 
 def _ctx(req: Request) -> AppContext:
@@ -405,7 +414,8 @@ def _updated(listing: dict[str, Any]) -> int | None:
     return None
 
 
-def _row(listing: dict[str, Any], paths: dict[int, str], sources: dict[int, str]) -> dict[str, Any]:
+def _row(listing: dict[str, Any], paths: dict[int, str], sources: dict[int, str],
+         prints: set[int] | None = None) -> dict[str, Any]:
     listing_id = _id(listing)
     audit = seo.audit_listing(listing)
     kind, type_name = _product_type(listing, paths)
@@ -428,9 +438,30 @@ def _row(listing: dict[str, Any], paths: dict[int, str], sources: dict[int, str]
         "type": kind,
         "type_name": type_name,
         "source": sources.get(listing_id),
+        # Whether an order of it can be printed (drop.printfiles); None for a download,
+        # which Etsy delivers itself.
+        "print_file": (None if prints is None or _download_only(listing)
+                       else listing_id in prints),
         "url": str(listing.get("url") or ""),
         "_tags": tags,
     }
+
+
+def _download_only(listing: dict[str, Any]) -> bool:
+    return str(listing.get("type") or "") == "download"
+
+
+def _print_ids(ctx: AppContext, entries: dict[int, tuple[str, dict[str, Any]]]) -> set[int]:
+    """The listings that have a print file, once every listing stallkit made has kept its
+    design while it is still in 2-PRODUCTS or archive/ (drafts made before 0.3.4)."""
+    from ...drop import printfiles
+
+    root = ctx.workspace_root()
+    try:
+        printfiles.backfill(root, {i: name for i, (name, _entry) in entries.items()})
+    except OSError:
+        pass
+    return printfiles.listing_ids(root)
 
 
 _FOLD = str.maketrans({"ı": "i", "ş": "s", "ç": "c", "ğ": "g", "ö": "o", "ü": "u"})
@@ -471,6 +502,9 @@ def list_listings(req: Request) -> dict[str, Any]:
     if band and band not in SEO_BANDS:
         raise ApiError(422, "invalid", "seo must be high, mid or low", field="seo")
     kind = req.query.get("type") or ""
+    printed = req.query.get("print") or ""
+    if printed and printed not in PRINT_FILTERS:
+        raise ApiError(422, "invalid", "print must be missing or present", field="print")
     per_page = req.int_query("per_page", PER_PAGE_DEFAULT, min=1, max=100) or PER_PAGE_DEFAULT
     page = req.int_query("page", 1, min=1, max=100000) or 1
     force = req.bool_query("refresh")
@@ -497,7 +531,8 @@ def list_listings(req: Request) -> dict[str, Any]:
     sources = {listing_id: name for listing_id, (name, _entry) in entries.items()}
     # Only the latest run's drafts are "new" (the header's "N yeni taslak"), not every draft.
     counts["new_drafts"] = _new_drafts(ctx, client, entries, counts.get("draft"))
-    rows = [_row(listing, paths, sources) for listing in listings]
+    prints = _print_ids(ctx, entries)
+    rows = [_row(listing, paths, sources, prints) for listing in listings]
     if query:
         rows = [
             r for r in rows
@@ -509,8 +544,13 @@ def list_listings(req: Request) -> dict[str, Any]:
     type_counts: dict[str, int] = {}
     for r in rows:
         type_counts[r["type"]] = type_counts.get(r["type"], 0) + 1
+    # The Baskı dosyası filter's counts, like the type counts: before it filters.
+    prints_count = {"missing": sum(1 for r in rows if r["print_file"] is False),
+                    "present": sum(1 for r in rows if r["print_file"] is True)}
     if kind:
         rows = [r for r in rows if r["type"] == kind]
+    if printed:
+        rows = [r for r in rows if r["print_file"] is (printed == "present")]
     if band:
         rows = [r for r in rows if _seo_band(r["seo"]) == band]
     rows = _sort(rows, sort)
@@ -537,6 +577,7 @@ def list_listings(req: Request) -> dict[str, Any]:
             {"id": key, "count": n}
             for key, n in sorted(type_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         ],
+        "prints": prints_count,
         "ids": [r["id"] for r in rows[:MAX_NAV_IDS]],
         "currency": currency,
         "truncated": truncated,
@@ -722,7 +763,7 @@ def _detail(ctx: AppContext, client: Any, listing: dict[str, Any],
     paths = _taxonomy_paths(client)
     entries = _source_entries(ctx, client)
     sources = {listing_id: name for listing_id, (name, _entry) in entries.items()}
-    row = _row(listing, paths, sources)
+    row = _row(listing, paths, sources, _print_ids(ctx, entries))
     entry = entries.get(row["id"], ("", {}))[1]
     names = entry.get("images") if isinstance(entry.get("images"), dict) else {}
     mockups = _mockup_facts(ctx) if names else {}
@@ -771,9 +812,25 @@ def _detail(ctx: AppContext, client: Any, listing: dict[str, Any],
         },
         "category": {"path": path, "short": " › ".join(path.split(" > ")[-2:]) if path else ""},
         "source": _source_info(ctx, row["source"], entry),
+        "print_files": _print_view(ctx, listing_id, row["print_file"] is not None),
         "limits": {"title": MAX_TITLE_LEN, "tags": MAX_TAGS, "tag_len": MAX_TAG_LEN,
                    "images": MAX_LISTING_IMAGES},
         "etsy_url": etsy_url,
+    }
+
+
+def _print_view(ctx: AppContext, listing_id: int, needed: bool = True) -> dict[str, Any]:
+    """The listing's print files for its page. `needed`: False for a download-only
+    listing, whose file Etsy delivers."""
+    from ...drop import printfiles
+
+    root = ctx.workspace_root()
+    found = printfiles.files(root, listing_id)
+    return {
+        "needed": needed,
+        "folder": printfiles.folder(root, listing_id).relative_to(root).as_posix(),
+        "files": [printfiles.describe(root, path) for path in found],
+        "max_bytes": PRINT_UPLOAD_MAX,
     }
 
 
@@ -1221,3 +1278,44 @@ def import_apply(req: Request) -> dict[str, Any]:
     job = ctx.jobs.start("listings-import", "listings:job.import", work,
                          params={"n": len(rows)}, cancellable=True)
     return job.summary()
+
+
+# --- print files --------------------------------------------------------------------------
+
+
+def add_print_file(req: Request) -> dict[str, Any]:
+    """Save the raw body as one of the listing's print files. Nothing is sent to Etsy."""
+    from ...drop import printfiles
+
+    ctx = _ctx(req)
+    listing_id = req.params["id"]
+    data = req.body
+    if not data:
+        raise ApiError(422, "invalid", "The file is empty.", field="body")
+    if len(data) > PRINT_UPLOAD_MAX:
+        raise ApiError(413, "too_large", "A print file added here can be at most 100 MB; "
+                       "copy a larger one into its folder.", limit=PRINT_UPLOAD_MAX,
+                       max_mb=PRINT_UPLOAD_MAX // (1024 * 1024))
+    try:
+        path, duplicate = printfiles.add(ctx.workspace_root(), listing_id,
+                                         req.query.get("name", ""), data)
+    except ValidationError as exc:
+        raise ApiError(422, "not_print_file", str(exc), field="name") from exc
+    except OSError as exc:
+        raise ApiError(500, "internal", f"Could not save the file: {exc}") from exc
+    return {"file": path.name, "duplicate": duplicate,
+            "print_files": _print_view(ctx, listing_id)}
+
+
+def open_print_folder(req: Request) -> dict[str, Any]:
+    """Show print-files/<id> in Explorer or Finder (made first when it is not there)."""
+    from ...drop import printfiles
+
+    ctx = _ctx(req)
+    path = printfiles.folder(ctx.workspace_root(), req.params["id"])
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        files.open_path(path)
+    except OSError as exc:
+        raise ApiError(500, "internal", f"Could not open the folder: {exc}") from exc
+    return {"ok": True, "path": str(path)}

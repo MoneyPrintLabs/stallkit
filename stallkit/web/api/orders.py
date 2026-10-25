@@ -184,6 +184,10 @@ def flatten(receipt: dict[str, Any], tab: str | None = None) -> dict[str, Any]:
             "listing_id": txn.get("listing_id"),
             "listing_image_id": txn.get("listing_image_id"),
             "thumb": None,
+            # Whether the listing's print file is on this computer (drop.printfiles),
+            # filled in by the page's answer; a digital item needs none.
+            "print_file": None,
+            "_digital": bool(txn.get("is_digital")),
         })
     shipments = [
         {
@@ -558,6 +562,21 @@ class OrdersApi:
                 images = info.get("images") or {}
                 item["thumb"] = images.get(item.get("listing_image_id")) or info.get("first")
 
+    def _add_print_files(self, rows: list[dict[str, Any]]) -> None:
+        """items[].print_file: True when the listing's print file is kept here, False when
+        it is not (the order cannot be printed yet), None for a digital item."""
+        from ...drop import printfiles
+
+        try:
+            have = printfiles.listing_ids(self.ctx.workspace_root())
+        except OSError:
+            have = set()
+        for row in rows:
+            for item in row["items"]:
+                digital = item.pop("_digital", False)
+                if not digital and isinstance(item.get("listing_id"), int):
+                    item["print_file"] = item["listing_id"] in have
+
     def _anonymise(self, rows: list[dict[str, Any]], offset: int) -> None:
         if not self.ctx.anonymise_names:
             return
@@ -601,6 +620,7 @@ class OrdersApi:
             total = payload["count"] if payload["count"] is not None else len(page_items)
         rows = [flatten(r, tab) for r in page_items]
         self._add_thumbs(client, rows)
+        self._add_print_files(rows)
         self._anonymise(rows, offset)
         pages = max(1, -(-total // per_page))
         return {

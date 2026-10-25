@@ -123,7 +123,9 @@
     "errors.not_waiting": "Bu sipariş artık kargo beklemiyor, gönderilmedi.",
     "leave.unsaved": "{n} siparişin takip numarası kaydedilemedi. Sayfadan çıkarsanız bu numaralar kaybolur.",
     "leave.unsaved_one": "{n} siparişin takip numarası kaydedilemedi. Sayfadan çıkarsanız bu numara kaybolur.",
-    "drafts.failed": "Takip numaraları kaydedilemedi"
+    "drafts.failed": "Takip numaraları kaydedilemedi",
+    "print.missing": "Baskı dosyası yok",
+    "print.missing_tip": "Bu siparişte {n} ürünün tasarımı bilgisayarda yok: basılamaz. Ürüne tıklayıp ilanın sayfasından dosyayı ekleyin."
   },
   "en": {
     "title": "Orders",
@@ -249,6 +251,8 @@
     "errors.not_waiting": "This order no longer waits for shipment, so it was not sent.",
     "leave.unsaved": "Tracking numbers for {n} orders could not be saved. They are lost if you leave this page.",
     "leave.unsaved_one": "The tracking number for {n} order could not be saved. It is lost if you leave this page.",
-    "drafts.failed": "Could not save the tracking numbers"
+    "drafts.failed": "Could not save the tracking numbers",
+    "print.missing": "No print file",
+    "print.missing_tip": "{n} item(s) of this order have no design on this computer, so they cannot be printed. Click the product and add the file on the listing's page."
   }
 }

@@ -104,6 +104,7 @@ from . import (
     infoimages,
     mockup,
     pipeline,
+    printfiles,
     seeds,
 )
 from . import watermark as watermark_mod
@@ -1348,6 +1349,10 @@ class _Run:
         item.files_uploaded = result.files_uploaded
         entry.update(status=result.status, message=result.message,
                      files_uploaded=result.files_uploaded)
+        if item.listing_id:
+            # The draft exists: its design goes to print-files/<id>, so an order of it
+            # can be printed even after the design leaves 2-PRODUCTS.
+            printfiles.keep(self.ws.root, item.listing_id, item.source)
         refused = (result.status == "error" and not recorder.created
                    and _never_arrived(recorder.error))
         if refused:

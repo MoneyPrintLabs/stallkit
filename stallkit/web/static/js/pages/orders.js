@@ -512,6 +512,13 @@ export default {
       const parts = [kind, ...first.variations.map((v) => v.value || v.name)].filter(Boolean);
       if (first.quantity > 1) parts.push(t("qty", { n: first.quantity }));
       const more = row.items.length - 1;
+      // An order still to make whose listing has no print file kept (drop/printfiles):
+      // it cannot be printed until the design is added on the listing's page.
+      const unprintable = row.status === "unshipped" ? row.items.filter((it) => it.print_file === false).length : 0;
+      // A mark on the picture, so the size and colour beside it stay readable.
+      const noPrint = unprintable
+        ? h("span", { class: "o-noprint", role: "img", "aria-label": t("print.missing"), title: t("print.missing_tip", { n: unprintable }) }, icon("alert", { size: 11, strokeWidth: 2.4 }))
+        : null;
       const sub =
         parts.length || more > 0
           ? h(
@@ -525,7 +532,7 @@ export default {
       return h(
         "div",
         { class: "o-product", title: titles },
-        thumb({ src: first.thumb, size: 36, icon: "box", alt: "" }),
+        h("span", { class: "o-thumb-wrap" }, thumb({ src: first.thumb, size: 36, icon: "box", alt: "" }), noPrint),
         h(
           "div",
           { class: "o-cell" },

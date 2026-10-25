@@ -503,3 +503,12 @@
 .lst-import-warn {
   color: var(--warning);
 }
+
+/* A listing whose print file is not kept (drop/printfiles): an order of it cannot be printed. */
+.page-listings .lst-noprint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warning);
+  white-space: nowrap;
+}
