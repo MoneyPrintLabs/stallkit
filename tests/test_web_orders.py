@@ -757,7 +757,7 @@ def test_parse_size_and_plan():
     size = pr.parse_size(["60 x 90 cm"])
     assert round(size.width_in, 1) == 23.6 and size.kind == "panel"
     assert pr.parse_size(["Traditional"]) is None
-    big = pr.plan(pr.parse_size(["Mural 120×140 in"]), (1000, 1000))
+    big = pr.plan(pr.parse_size(["Mural 120×140 in"]), (1600, 1000))
     assert big.mode == "cover" and big.lowered and big.width_px * big.height_px <= pr.MAX_PIXELS * 1.01
 
 
@@ -768,8 +768,10 @@ def test_a_roll_keeps_300_dpi_and_a_small_design_is_flagged_soft():
     assert roll.to_dict()["soft"] is True
     sharp = pr.plan(pr.parse_size(["1 Roll 23×160 in"]), (2300, 2300), dpi=300, repeats=3)
     assert sharp.to_dict()["soft"] is False
-    mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=300)
-    assert mural.lowered and mural.dpi < 100
+    mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (5000, 3000), dpi=300)
+    assert mural.mode == "cover" and mural.lowered and mural.dpi < 100
+    repeated = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=150)
+    assert repeated.mode == "pattern" and repeated.repeats >= 1
 
 
 def test_the_invoice_sheet_holds_the_order_and_survives_odd_characters():

@@ -229,7 +229,11 @@ def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
          roll_width_in: float = ROLL_WIDTH_IN) -> Plan:
     """What the file of an item of `size` is, from a design of `tile_size` pixels."""
     dpi = max(MIN_DPI, min(MAX_DPI, int(dpi)))
-    mode = mode or ("cover" if size.kind == "mural" else "pattern")
+    if mode is None:
+        # A mural of a near-square design is that design repeated (the listing sells the
+        # same tile as rolls and as murals); a wide or tall picture covers the wall.
+        ratio = tile_size[0] / max(1, tile_size[1])
+        mode = "cover" if size.kind == "mural" and not 0.8 <= ratio <= 1.25 else "pattern"
     notes: list[str] = []
     lowered = False
     limit = MAX_PATTERN_PIXELS if mode == "pattern" else MAX_PIXELS

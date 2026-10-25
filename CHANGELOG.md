@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     cross-faded into itself along the edges, then measured again. The dialog says so; the
     design file itself is never changed. A design enlarged more than 1.2× to fill its file is
     sharpened a little, and one enlarged more than 1.5× is flagged.
+  - **Murals of a tile.** A mural size ordered from a near-square (tile) design repeats the
+    pattern at the same scale as a roll; a wide or tall picture still covers the wall.
   - **Ready before you look.** When Siparişler opens, a background job makes the print files
     and invoice sheet of every order waiting to ship that has none yet, and the bell says how
     many were made and how many lack a print file on their listing
