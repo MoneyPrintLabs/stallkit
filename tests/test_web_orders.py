@@ -733,7 +733,10 @@ def test_print_plan_and_make_a_roll(web):
     out = root / "print-files" / "orders" / str(rid) / item["file"]
     with Image.open(out) as image:
         assert image.size == (1150, 2000)
-    assert [f["name"] for f in made["files"]] == [item["file"]]
+    assert [f["name"] for f in made["files"]] == [item["file"], f"order-{rid}-invoice.pdf"]
+    invoice = (root / "print-files" / "orders" / str(rid) / f"order-{rid}-invoice.pdf").read_bytes()
+    assert invoice.startswith(b"%PDF-1.4") and invoice.rstrip().endswith(b"%%EOF")
+    assert b"/DCTDecode" in invoice  # the product's picture is on the sheet
 
 
 def test_print_says_why_an_item_cannot_be_made(web):
@@ -767,3 +770,21 @@ def test_a_roll_keeps_300_dpi_and_a_small_design_is_flagged_soft():
     assert sharp.to_dict()["soft"] is False
     mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=300)
     assert mural.lowered and mural.dpi < 100
+
+
+def test_the_invoice_sheet_holds_the_order_and_survives_odd_characters():
+    import zlib
+    from PIL import Image
+    from stallkit.drop import invoice
+    receipt = {"receipt_id": 42, "name": "Şule Öztürk (Ünal)", "first_line": "1 Main St",
+               "city": "Izmir", "country_iso": "TR", "is_paid": True,
+               "transactions": [{"title": "Leopard Jungle Wallpaper " * 6, "quantity": 2,
+                                 "price": {"amount": 1600, "divisor": 100, "currency_code": "USD"},
+                                 "variations": [{"formatted_name": "Size", "formatted_value": "SAMPLE 15x20"}]}],
+               "grandtotal": {"amount": 3200, "divisor": 100, "currency_code": "USD"}}
+    pdf = invoice.build(receipt, "ExampleShop", {1: Image.new("RGB", (30, 40), "white")})
+    body = pdf.split(b"/Filter /FlateDecode", 1)[1].split(b"stream\n", 1)[1]
+    page = zlib.decompress(body.split(b"\nendstream", 1)[0])
+    assert "Sule Öztürk".encode("cp1252") in page and b"#42" in page and b"2 x US$16.00" in page
+    assert b"US$32.00" in page and b"/Im1 Do" in page
+    assert invoice.money({"amount": 5, "divisor": 100, "currency_code": "TRY"}) == "TRY 0.05"

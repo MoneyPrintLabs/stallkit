@@ -34,6 +34,7 @@ import csv
 import functools
 import io
 import json
+import logging
 import re
 import threading
 import time
@@ -69,6 +70,7 @@ SHIPPED_SCAN_LIMIT = 1000  # shipped receipts changed this month, read to count 
 EXPORT_LIMIT = 1000       # receipts in one CSV export
 MAX_PER_PAGE = 100
 SHIP_MAX_ROWS = 500
+log = logging.getLogger("stallkit.web")
 QUICK_ATTEMPTS = 2        # a page is waiting: two tries per Etsy request, not five
 IMPORT_MAX_BYTES = 2 * 1024 * 1024
 LIST_TTL = 60.0           # receipts and counts: re-read after a minute
@@ -523,7 +525,7 @@ def _print_items(root: Any, receipt: dict[str, Any], *, dpi: int,
         if size is None:
             continue
         made = production.plan(size, image.size, dpi=dpi, repeats=repeats)
-        item.update(_image=image, _plan=made, plan=made.to_dict())
+        item.update(_image=image, _plan=made, _size=size, plan=made.to_dict())
         if made.mode == "pattern":
             item["seam"] = {"across": across, "down": down,
                             "ok": max(across, down) < production.SEAM_WARN}
@@ -784,7 +786,31 @@ class OrdersApi:
             except (OSError, ValueError, MemoryError) as exc:
                 raise ApiError(500, "internal", f"Could not make {item['file']}: {exc}") from exc
             item["made"] = True
+        self._write_invoice(receipt, items, folder)
         return self._print_answer(receipt_id, items, dpi)
+
+    def _write_invoice(self, receipt: dict[str, Any], items: list[dict[str, Any]],
+                       folder: Any) -> None:
+        """order-<id>-invoice.pdf: the order's sheet with each item's picture at the bottom
+        right, as the printer is sent it (drop/invoice.py). A failure here never costs the
+        print files already made."""
+        from ...drop import invoice, printfiles
+
+        try:
+            pictures = {
+                item["index"]: invoice.picture_for(item["_image"], item["_plan"], item["_size"])
+                for item in items if item.get("_plan") is not None
+            }
+            shop = (self.ctx.status.get("shop") or {}).get("name") or ""
+            data = invoice.build(receipt, shop, pictures)
+            name = f"order-{receipt.get('receipt_id')}-invoice.pdf"
+            folder.mkdir(parents=True, exist_ok=True)
+            temporary = folder / f"{printfiles.PART_PREFIX}{name}"
+            temporary.write_bytes(data)
+            temporary.replace(folder / name)
+        except (OSError, ValueError, MemoryError):
+            log.warning("could not write the invoice of order %s", receipt.get("receipt_id"),
+                        exc_info=True)
 
     def open_print(self, req: Request) -> dict[str, Any]:
         from ...drop import production

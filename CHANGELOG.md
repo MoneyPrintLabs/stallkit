@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Opening it makes the files at once (one click: *Siparişi hazırla*), at the 150 or 300 dpi
     last chosen, and **Siparişleri hazırla** in the header does the same for every order
     waiting to ship, naming the ones that still lack a print file.
+  - **The order's invoice sheet.** Making an order's files also writes
+    `order-<id>-invoice.pdf` beside them: the sheet Etsy prints for the order (ship-to, order
+    number and date, items with their variations, totals), made from the order itself, with
+    the picture of each item sold at the bottom right, at the proportions of the size
+    ordered (a long roll shows its top). It is what the printer is sent with the print file.
 
 ## [0.3.3] — 2026-10-04
 

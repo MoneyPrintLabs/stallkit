@@ -598,7 +598,13 @@ export default {
             it.made ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), it.file) : null,
           );
         });
-        mount(body, h("div", { class: "o-print-dpi" }, h("span", { class: "muted" }, t("print.quality")), dpiSel), lines.length ? lines : h("p", { class: "muted" }, t("print.none")));
+        const sheet = (d.files || []).find((f) => /-invoice\.pdf$/i.test(f.name));
+        mount(
+          body,
+          h("div", { class: "o-print-dpi" }, h("span", { class: "muted" }, t("print.quality")), dpiSel),
+          lines.length ? lines : h("p", { class: "muted" }, t("print.none")),
+          sheet ? h("div", { class: "o-print-item" }, h("strong", null, t("print.invoice")), h("span", { class: "o-print-done" }, icon("check", { size: 12 }), sheet.name)) : null,
+        );
         makeBtn.disabled = !d.ready;
       }
       async function make() {

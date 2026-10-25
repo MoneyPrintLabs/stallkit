@@ -151,7 +151,8 @@
     "print.all_none": "Kargo bekleyen sipariş yok",
     "print.all_progress": "{i}/{n} hazırlanıyor…",
     "print.all_done": "{n} baskı dosyası hazır",
-    "print.all_skipped": "{n} siparişin ilanında baskı dosyası yok ya da ölçü okunamadı: onları tek tek açın"
+    "print.all_skipped": "{n} siparişin ilanında baskı dosyası yok ya da ölçü okunamadı: onları tek tek açın",
+    "print.invoice": "Fatura (ürün görselli)"
   },
   "en": {
     "title": "Orders",
@@ -305,6 +306,7 @@
     "print.all_none": "No order is waiting to ship",
     "print.all_progress": "Preparing {i}/{n}…",
     "print.all_done": "{n} print files ready",
-    "print.all_skipped": "{n} orders have no print file on their listing or no readable size: open them one by one"
+    "print.all_skipped": "{n} orders have no print file on their listing or no readable size: open them one by one",
+    "print.invoice": "Invoice sheet (with the product picture)"
   }
 }
