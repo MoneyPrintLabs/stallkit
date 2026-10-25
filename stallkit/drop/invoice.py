@@ -223,7 +223,7 @@ def build(receipt: dict[str, Any], shop_name: str, pictures: dict[int, Image.Ima
     page.text(RIGHT_X, 112, f"{count} item{'s' if count != 1 else ''}", 9, bold=True)
     page.rule(RIGHT_X, RIGHT_END, 120)
     y = 134.0
-    for index, txn in enumerate(transactions, start=1):
+    for txn in transactions:
         top = y
         for line in wrap(str(txn.get("title") or ""), 8.5, RIGHT_END - RIGHT_X - 120, bold=True):
             page.text(RIGHT_X, y + 8, line, 8.5, bold=True)

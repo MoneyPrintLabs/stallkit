@@ -774,7 +774,9 @@ def test_a_roll_keeps_300_dpi_and_a_small_design_is_flagged_soft():
 
 def test_the_invoice_sheet_holds_the_order_and_survives_odd_characters():
     import zlib
+
     from PIL import Image
+
     from stallkit.drop import invoice
     receipt = {"receipt_id": 42, "name": "Şule Öztürk (Ünal)", "first_line": "1 Main St",
                "city": "Izmir", "country_iso": "TR", "is_paid": True,
@@ -792,7 +794,9 @@ def test_the_invoice_sheet_holds_the_order_and_survives_odd_characters():
 
 def test_a_tile_whose_edges_do_not_meet_is_made_seamless():
     import random
+
     from PIL import Image
+
     from stallkit.drop import production as pr
     random.seed(3)
     tile = Image.new("RGB", (240, 240))
