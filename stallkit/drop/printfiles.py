@@ -45,7 +45,8 @@ def folder(root: Path, listing_id: int) -> Path:
     return root / PRINT_DIR / str(int(listing_id))
 
 
-def _files_in(path: Path) -> list[Path]:
+def files_in(path: Path) -> list[Path]:
+    """The finished files directly in `path` (no hidden, system or half-written ones)."""
     try:
         entries = list(path.iterdir())
     except OSError:
@@ -59,7 +60,7 @@ def _files_in(path: Path) -> list[Path]:
 
 def files(root: Path, listing_id: int) -> list[Path]:
     """The listing's print files, by name; [] when it has none."""
-    return _files_in(folder(root, listing_id))
+    return files_in(folder(root, listing_id))
 
 
 def listing_ids(root: Path) -> set[int]:
@@ -69,7 +70,7 @@ def listing_ids(root: Path) -> set[int]:
     except OSError:
         return set()
     return {int(e.name) for e in entries
-            if _ID.fullmatch(e.name) and e.is_dir() and _files_in(e)}
+            if _ID.fullmatch(e.name) and e.is_dir() and files_in(e)}
 
 
 def _copy_into(target: Path, name: str, write) -> Path:

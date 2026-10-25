@@ -17,6 +17,7 @@ import {
   iconButton,
   infoNote,
   menu,
+  modal,
   mount,
   pagination,
   progressBar,
@@ -491,7 +492,61 @@ export default {
         { class: "o-cell" },
         h("span", { class: "o-no num" }, `#${row.receipt_id}`),
         h("span", { class: "o-sub o-date num", title: row.created ? dateTime(row.created) : null }, row.created ? `${date(row.created)} · ${time(row.created)}` : "–"),
+        row.status === "unshipped" ? h("button", { type: "button", class: "o-printbtn", onClick: () => openPrint(row) }, icon("layers", { size: 12 }), t("print.button")) : null,
       );
+    }
+
+    // Baskı dosyası: each item's print-ready file, made from its listing's print file
+    // (drop/production.py). Local only: nothing is sent to Etsy.
+    async function openPrint(row) {
+      const body = h("div", { class: "o-print" }, h("p", { class: "muted" }, t("print.loading")));
+      const makeBtn = button({ label: t("print.make"), icon: "layers", variant: "primary", disabled: true, onClick: () => make() });
+      const folderBtn = button({
+        label: t("print.folder"),
+        icon: "folder-open",
+        variant: "ghost",
+        onClick: () => ctx.api.post(`/api/orders/${row.receipt_id}/print/open`).catch((err) => ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) })),
+      });
+      modal({ title: t("print.title", { id: row.receipt_id }), subtitle: t("print.sub"), body, width: 560, actions: [folderBtn, makeBtn] });
+      const dpi = 150;
+      function show(d) {
+        const lines = d.items.map((it) => {
+          const bits = [];
+          if (it.plan) {
+            bits.push(t("print.px", { w: it.plan.width_px, h: it.plan.height_px, dpi: it.plan.dpi }));
+            bits.push(it.plan.mode === "pattern" ? t("print.repeats", { n: it.plan.repeats }) : t("print.cover"));
+            if (it.plan.lowered) bits.push(t("print.lowered", { dpi: it.plan.dpi }));
+          }
+          const seamBad = it.seam && !it.seam.ok;
+          const warn = it.problem ? t(`print.problem.${it.problem}`) : seamBad ? t("print.seam", { a: it.seam.across, b: it.seam.down }) : "";
+          return h(
+            "div",
+            { class: cx("o-print-item", (it.problem || seamBad) && "is-warn") },
+            h("strong", null, `${it.quantity}× ${it.size ? it.size.label : it.title}`, it.material ? ` · ${it.material}` : ""),
+            h("span", { class: "muted" }, bits.join(" · ") || "–"),
+            warn ? h("span", { class: "o-print-warn" }, icon("alert", { size: 12 }), warn) : null,
+            it.made ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), it.file) : null,
+          );
+        });
+        mount(body, lines.length ? lines : h("p", { class: "muted" }, t("print.none")));
+        makeBtn.disabled = !d.ready;
+      }
+      async function make() {
+        makeBtn.disabled = true;
+        try {
+          const d = await ctx.api.post(`/api/orders/${row.receipt_id}/print`, { dpi });
+          show(d);
+          ctx.toast({ tone: "success", title: t("print.done", { n: d.items.filter((i) => i.made).length }) });
+        } catch (err) {
+          makeBtn.disabled = false;
+          ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) });
+        }
+      }
+      try {
+        show(await ctx.api.get(`/api/orders/${row.receipt_id}/print`, { dpi }, { signal: ctx.signal }));
+      } catch (err) {
+        mount(body, h("p", { class: "o-print-warn" }, ctx.api.errorText(err, t)));
+      }
     }
 
     function renderBuyer(row) {

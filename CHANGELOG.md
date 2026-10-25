@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     once), or open its folder to copy a larger one in. Nothing of this goes to Etsy.
   - **Siparişler**: an order waiting to ship with an item whose listing has no print file
     says *Baskı dosyası yok* (`print_file` on each item).
+  - **Print-ready files from an order.** **Siparişler** has a *Baskı dosyası* link on each
+    order waiting to ship. It reads every item's size from its variation ("1 Roll 23×160
+    in", "Mural 120×140 in", "SAMPLE 15×20 in", cm too) and makes its file from the
+    listing's print file into `print-files/orders/<order id>/`, as a JPEG with its dpi
+    (150 by default): a roll or sample repeats the design a whole number of times across
+    the roll's width, so rolls hang side by side without a step; a mural covers the whole
+    wall (made at a lower dpi if it would not fit in memory, and it says so). A design whose
+    opposite edges do not meet is flagged, since a line would show where it repeats.
+    Nothing is sent to Etsy (`GET/POST /api/orders/{id}/print`, `drop/production.py`).
 
 ## [0.3.3] — 2026-10-04
 

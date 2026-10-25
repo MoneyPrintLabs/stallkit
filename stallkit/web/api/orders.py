@@ -10,6 +10,9 @@
     POST /api/orders/import-tracking         raw CSV body -> parsed rows (no Etsy call)
     GET  /api/orders/drafts                  carriers and numbers not sent yet (this computer)
     POST /api/orders/drafts {rows:[{receipt_id, carrier_name, tracking_code, note_to_buyer?}]}
+    GET  /api/orders/{id}/print?dpi=&repeats=  what each item's print-ready file would be
+    POST /api/orders/{id}/print {dpi?, repeats?} make them (print-files/orders/<id>/; local)
+    POST /api/orders/{id}/print/open         show that folder
 
 Etsy facts (checked against the OpenAPI spec, 3.0.0): getShopReceipts filters
 was_paid / was_shipped / was_delivered / was_canceled (booleans), sort_on
@@ -119,6 +122,9 @@ def register(r: Router, ctx: AppContext) -> None:
     r.post("/api/orders/import-tracking", api.import_tracking)
     r.get("/api/orders/drafts", api.get_drafts)
     r.post("/api/orders/drafts", api.save_drafts)
+    r.get("/api/orders/{id:int}/print", api.print_plan)
+    r.post("/api/orders/{id:int}/print", api.make_print)
+    r.post("/api/orders/{id:int}/print/open", api.open_print)
 
 
 # --- pure helpers (tested directly) -----------------------------------------------------
@@ -470,6 +476,66 @@ def _quick(handler: Any) -> Any:
     return run
 
 
+def _print_items(root: Any, receipt: dict[str, Any], *, dpi: int,
+                 repeats: int | None) -> list[dict[str, Any]]:
+    """Each physical item of an order and the print-ready file it becomes (drop.production):
+    its size from the variation, its listing's print file, how the design fills it and
+    how well the design repeats. `problem` says why an item cannot be made."""
+    from PIL import Image
+
+    from ...drop import production
+
+    out: list[dict[str, Any]] = []
+    folder = production.order_folder(root, receipt.get("receipt_id") or 0)
+    txns = [t for t in receipt.get("transactions") or [] if isinstance(t, dict)]
+    for index, txn in enumerate(txns, start=1):
+        if txn.get("is_digital"):
+            continue
+        values = [str(v.get("formatted_value") or "") for v in txn.get("variations") or []
+                  if isinstance(v, dict)]
+        size = production.parse_size(values + [str(txn.get("title") or "")])
+        material = production.material_of(values, size)
+        quantity = txn.get("quantity") if isinstance(txn.get("quantity"), int) else 1
+        listing_id = txn.get("listing_id") if isinstance(txn.get("listing_id"), int) else None
+        item: dict[str, Any] = {
+            "index": index, "transaction_id": txn.get("transaction_id"),
+            "title": str(txn.get("title") or ""), "listing_id": listing_id,
+            "quantity": quantity, "variations": values, "material": material,
+            "size": size.to_dict() if size else None, "source": None, "seam": None,
+            "plan": None, "file": None, "made": False, "problem": None,
+        }
+        out.append(item)
+        design = production.design_file(root, listing_id) if listing_id else None
+        if size is None:
+            item["problem"] = "no_size"
+        if design is None:
+            item["problem"] = item["problem"] or ("no_print_file" if listing_id else "no_listing")
+            continue
+        try:
+            image = production.open_design(design)
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+            item["problem"] = item["problem"] or "unreadable"
+            continue
+        across, down = production.seam_ratios(image)
+        item["source"] = {"name": design.name, "rel": design.relative_to(root).as_posix(),
+                          "width": image.width, "height": image.height,
+                          "mtime": int(design.stat().st_mtime)}
+        if size is None:
+            continue
+        made = production.plan(size, image.size, dpi=dpi, repeats=repeats)
+        item.update(_image=image, _plan=made, plan=made.to_dict())
+        if made.mode == "pattern":
+            item["seam"] = {"across": across, "down": down,
+                            "ok": max(across, down) < production.SEAM_WARN}
+        item["file"] = production.file_name(index, made, material, quantity)
+        item["made"] = (folder / item["file"]).is_file()
+    return out
+
+
+def _public(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{k: v for k, v in item.items() if not k.startswith("_")} for item in items]
+
+
 class _Cache:
     """A small time-limited dict, safe between request threads."""
 
@@ -646,6 +712,91 @@ class OrdersApi:
                 return []
             raise
         return [found] if isinstance(found, dict) and found.get("receipt_id") else []
+
+    # --- print-ready files (drop.production) ------------------------------------------------
+
+    def _print_args(self, source: Any) -> tuple[int, int | None]:
+        from ...drop import production
+
+        try:
+            dpi = int(source.get("dpi") or production.DEFAULT_DPI)
+            raw = source.get("repeats")
+            repeats = int(raw) if raw not in (None, "", 0, "0") else None
+        except (TypeError, ValueError) as exc:
+            raise ApiError(422, "invalid", "dpi and repeats must be whole numbers",
+                           field="dpi") from exc
+        if not production.MIN_DPI <= dpi <= production.MAX_DPI:
+            raise ApiError(422, "invalid",
+                           f"dpi must be {production.MIN_DPI}-{production.MAX_DPI}", field="dpi")
+        if repeats is not None and not 1 <= repeats <= 40:
+            raise ApiError(422, "invalid", "repeats must be 1-40", field="repeats")
+        return dpi, repeats
+
+    def _receipt_for_print(self, receipt_id: int) -> dict[str, Any]:
+        client = self.ctx.client()
+        with client.attempts(QUICK_ATTEMPTS):
+            found = self._one_receipt(client, receipt_id)
+        if not found:
+            raise ApiError(404, "not_found", f"Your shop has no order {receipt_id}.")
+        return found[0]
+
+    def _print_answer(self, receipt_id: int, items: list[dict[str, Any]],
+                      dpi: int) -> dict[str, Any]:
+        from ...drop import printfiles, production
+
+        root = self.ctx.workspace_root()
+        folder = production.order_folder(root, receipt_id)
+        return {
+            "receipt_id": receipt_id,
+            "dpi": dpi,
+            "folder": folder.relative_to(root).as_posix(),
+            "items": _public(items),
+            "ready": sum(1 for i in items if i["plan"]),
+            "files": [printfiles.describe(root, p) for p in printfiles.files_in(folder)],
+        }
+
+    def print_plan(self, req: Request) -> dict[str, Any]:
+        receipt_id = req.params["id"]
+        dpi, repeats = self._print_args(req.query)
+        receipt = self._receipt_for_print(receipt_id)
+        items = _print_items(self.ctx.workspace_root(), receipt, dpi=dpi, repeats=repeats)
+        return self._print_answer(receipt_id, items, dpi)
+
+    def make_print(self, req: Request) -> dict[str, Any]:
+        """Make every item's file that can be made. Local only: nothing goes to Etsy."""
+        from ...drop import production
+
+        receipt_id = req.params["id"]
+        dpi, repeats = self._print_args(req.json_object())
+        receipt = self._receipt_for_print(receipt_id)
+        root = self.ctx.workspace_root()
+        items = _print_items(root, receipt, dpi=dpi, repeats=repeats)
+        if not any(i["plan"] for i in items):
+            raise ApiError(422, "nothing_to_print", "No item of this order can be made yet.")
+        folder = production.order_folder(root, receipt_id)
+        for item in items:
+            made = item.get("_plan")
+            if made is None:
+                continue
+            try:
+                production.save(production.render(item["_image"], made),
+                                folder / item["file"], made.dpi)
+            except (OSError, ValueError, MemoryError) as exc:
+                raise ApiError(500, "internal", f"Could not make {item['file']}: {exc}") from exc
+            item["made"] = True
+        return self._print_answer(receipt_id, items, dpi)
+
+    def open_print(self, req: Request) -> dict[str, Any]:
+        from ...drop import production
+        from .. import files
+
+        path = production.order_folder(self.ctx.workspace_root(), req.params["id"])
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            files.open_path(path)
+        except OSError as exc:
+            raise ApiError(500, "internal", f"Could not open the folder: {exc}") from exc
+        return {"ok": True, "path": str(path)}
 
     # --- GET /api/orders/summary -------------------------------------------------------------
 
