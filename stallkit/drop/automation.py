@@ -27,7 +27,7 @@ from .. import csvio, listings
 from ..client import EtsyClient
 from ..config import LISTING_TYPES
 from ..errors import ValidationError
-from . import catalog, pipeline
+from . import catalog, pipeline, printfiles
 from . import watermark as watermark_mod
 from .template import Template
 from .workspace import Workspace
@@ -597,6 +597,8 @@ def run(workspace: Workspace, template: Template, *, client: EtsyClient | None =
             ).results[0]
             result.row = line
             entry.update(status=result.status, message=result.message)
+            if entry.get("listing_id"):
+                printfiles.keep(workspace.root, entry["listing_id"], product.source)
             save_history(path, state)
             report.uploaded.results.append(result)
         return report

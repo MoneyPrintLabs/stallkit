@@ -17,10 +17,12 @@ import {
   iconButton,
   infoNote,
   menu,
+  modal,
   mount,
   pagination,
   progressBar,
   searchInput,
+  select,
   table,
   tabs,
   thumb,
@@ -300,7 +302,43 @@ export default {
       class: "o-csv",
       onClick: () => fileInput.click(),
     });
-    ctx.setHeader({ actions: [csvBtn, sendBtn] });
+    const prepareAllBtn = button({
+      label: t("print.all"),
+      icon: "layers",
+      variant: "ghost",
+      title: t("print.all_tip"),
+      class: "o-prepare-all",
+      onClick: () => prepareAll(),
+    });
+    ctx.setHeader({ actions: [prepareAllBtn, csvBtn, sendBtn] });
+
+    // Every order waiting to ship: its print files, one after another. Local only.
+    async function prepareAll() {
+      const ids = (S.waiting || []).slice();
+      if (!ids.length) {
+        ctx.toast({ tone: "warning", title: t("print.all_none") });
+        return;
+      }
+      prepareAllBtn.disabled = true;
+      let made = 0;
+      let skipped = 0;
+      for (const [i, id] of ids.entries()) {
+        prepareAllBtn.querySelector(".btn-label")?.replaceChildren(t("print.all_progress", { i: i + 1, n: ids.length }));
+        try {
+          const d = await ctx.api.post(`/api/orders/${id}/print`, { dpi: savedDpi() });
+          made += d.items.filter((it) => it.made).length;
+        } catch (err) {
+          if (err.code === "nothing_to_print") skipped += 1;
+          else {
+            ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) });
+            break;
+          }
+        }
+      }
+      prepareAllBtn.disabled = false;
+      prepareAllBtn.querySelector(".btn-label")?.replaceChildren(t("print.all"));
+      ctx.toast({ tone: skipped ? "warning" : "success", title: t("print.all_done", { n: made }), message: skipped ? t("print.all_skipped", { n: skipped }) : undefined });
+    }
     const moreBtn = iconButton({
       icon: "more",
       variant: "ghost",
@@ -491,7 +529,100 @@ export default {
         { class: "o-cell" },
         h("span", { class: "o-no num" }, `#${row.receipt_id}`),
         h("span", { class: "o-sub o-date num", title: row.created ? dateTime(row.created) : null }, row.created ? `${date(row.created)} · ${time(row.created)}` : "–"),
+        row.status === "unshipped" ? h("button", { type: "button", class: "o-printbtn", onClick: () => openPrint(row) }, icon("layers", { size: 12 }), t("print.button")) : null,
       );
+    }
+
+    // Baskı dosyası: each item's print-ready file, made from its listing's print file
+    // (drop/production.py). Local only: nothing is sent to Etsy.
+    const PRINT_DPI_KEY = "stallkit.orders.print_dpi";
+    function savedDpi() {
+      try {
+        const v = Number(localStorage.getItem(PRINT_DPI_KEY));
+        return v === 300 ? 300 : 150;
+      } catch {
+        return 150;
+      }
+    }
+    function saveDpi(v) {
+      try {
+        localStorage.setItem(PRINT_DPI_KEY, String(v));
+      } catch {
+        /* the choice is only remembered */
+      }
+    }
+
+    async function openPrint(row) {
+      const body = h("div", { class: "o-print" }, h("p", { class: "muted" }, t("print.loading")));
+      const makeBtn = button({ label: t("print.make"), icon: "layers", variant: "primary", disabled: true, onClick: () => make() });
+      const folderBtn = button({
+        label: t("print.folder"),
+        icon: "folder-open",
+        variant: "ghost",
+        onClick: () => ctx.api.post(`/api/orders/${row.receipt_id}/print/open`).catch((err) => ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) })),
+      });
+      modal({ title: t("print.title", { id: row.receipt_id }), subtitle: t("print.sub"), body, width: 560, actions: [folderBtn, makeBtn] });
+      let dpi = savedDpi();
+      const dpiSel = select({
+        value: String(dpi),
+        options: [{ value: "150", label: "150 dpi" }, { value: "300", label: "300 dpi" }],
+        onChange: (v) => {
+          dpi = Number(v);
+          saveDpi(dpi);
+          load();
+        },
+      });
+      function show(d) {
+        const lines = d.items.map((it) => {
+          const bits = [];
+          if (it.plan) {
+            bits.push(t("print.px", { w: it.plan.width_px, h: it.plan.height_px, dpi: it.plan.dpi }));
+            bits.push(it.plan.mode === "pattern" ? t("print.repeats", { n: it.plan.repeats }) : t("print.cover"));
+            if (it.plan.lowered) bits.push(t("print.lowered", { dpi: it.plan.dpi }));
+          }
+          const seamBad = it.seam && !it.seam.ok;
+          const soft = it.plan && it.plan.soft;
+          const warn = it.problem
+            ? t(`print.problem.${it.problem}`)
+            : seamBad
+              ? t("print.seam", { a: it.seam.across, b: it.seam.down })
+              : soft
+                ? t("print.soft", { x: it.plan.upscale })
+                : "";
+          return h(
+            "div",
+            { class: cx("o-print-item", (it.problem || seamBad || soft) && "is-warn") },
+            h("strong", null, `${it.quantity}× ${it.size ? it.size.label : it.title}`, it.material ? ` · ${it.material}` : ""),
+            h("span", { class: "muted" }, bits.join(" · ") || "–"),
+            warn ? h("span", { class: "o-print-warn" }, icon("alert", { size: 12 }), warn) : null,
+            it.made ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), it.file) : null,
+          );
+        });
+        mount(body, h("div", { class: "o-print-dpi" }, h("span", { class: "muted" }, t("print.quality")), dpiSel), lines.length ? lines : h("p", { class: "muted" }, t("print.none")));
+        makeBtn.disabled = !d.ready;
+      }
+      async function make() {
+        makeBtn.disabled = true;
+        try {
+          const d = await ctx.api.post(`/api/orders/${row.receipt_id}/print`, { dpi });
+          show(d);
+          ctx.toast({ tone: "success", title: t("print.done", { n: d.items.filter((i) => i.made).length }) });
+        } catch (err) {
+          makeBtn.disabled = false;
+          ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) });
+        }
+      }
+      async function load() {
+        try {
+          const plan = await ctx.api.get(`/api/orders/${row.receipt_id}/print`, { dpi }, { signal: ctx.signal });
+          show(plan);
+          // "Siparişi hazırla" is one click: whatever can be made is made now.
+          if (plan.ready && plan.items.some((i) => i.plan && !i.made)) await make();
+        } catch (err) {
+          mount(body, h("p", { class: "o-print-warn" }, ctx.api.errorText(err, t)));
+        }
+      }
+      await load();
     }
 
     function renderBuyer(row) {
@@ -512,6 +643,13 @@ export default {
       const parts = [kind, ...first.variations.map((v) => v.value || v.name)].filter(Boolean);
       if (first.quantity > 1) parts.push(t("qty", { n: first.quantity }));
       const more = row.items.length - 1;
+      // An order still to make whose listing has no print file kept (drop/printfiles):
+      // it cannot be printed until the design is added on the listing's page.
+      const unprintable = row.status === "unshipped" ? row.items.filter((it) => it.print_file === false).length : 0;
+      // A mark on the picture, so the size and colour beside it stay readable.
+      const noPrint = unprintable
+        ? h("span", { class: "o-noprint", role: "img", "aria-label": t("print.missing"), title: t("print.missing_tip", { n: unprintable }) }, icon("alert", { size: 11, strokeWidth: 2.4 }))
+        : null;
       const sub =
         parts.length || more > 0
           ? h(
@@ -525,7 +663,7 @@ export default {
       return h(
         "div",
         { class: "o-product", title: titles },
-        thumb({ src: first.thumb, size: 36, icon: "box", alt: "" }),
+        h("span", { class: "o-thumb-wrap" }, thumb({ src: first.thumb, size: 36, icon: "box", alt: "" }), noPrint),
         h(
           "div",
           { class: "o-cell" },

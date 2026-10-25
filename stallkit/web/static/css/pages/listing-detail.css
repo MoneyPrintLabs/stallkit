@@ -207,6 +207,38 @@
   font-size: 11.5px;
   color: var(--muted);
 }
+/* The print file under the source design: what an order of the listing is printed from. */
+.page-listing-detail .ld-print {
+  padding: 6px 8px;
+  margin: -2px -8px 0;
+  border-radius: 10px;
+  border: 1px dashed transparent;
+}
+.page-listing-detail .ld-print .ld-source-text {
+  flex: 1 1 auto;
+  width: auto;
+}
+.page-listing-detail .ld-print.is-missing {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+.page-listing-detail .ld-print.is-missing .ld-source-name {
+  color: var(--warning);
+  font-weight: 600;
+}
+.page-listing-detail .ld-print.is-drop {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.page-listing-detail .ld-print-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 8px;
+  color: var(--warning);
+  background: var(--warning-soft);
+}
 .page-listing-detail .ld-seo {
   border: 1px solid color-mix(in srgb, var(--tone) 26%, transparent);
   cursor: pointer;

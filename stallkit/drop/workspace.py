@@ -24,6 +24,9 @@ ARCHIVE_DIR = "archive"
 # The shop's info images, which every draft gets after its own photos (drop.infoimages).
 # Made when the first one is added; never a product folder, never a workspace of its own.
 INFO_DIR = "info-images"
+# The original design of every listing, kept under its Etsy listing id so an order can
+# be printed (drop.printfiles). Made when the first one is kept; never a product folder.
+PRINT_DIR = "print-files"
 
 # The numbered folders a workspace makes inside itself. None of them is ever a workspace
 # of its own, and none of them is ever a product folder (see `root_for`).
@@ -50,7 +53,7 @@ HISTORY_FILE = "upload-history.json"
 WATERMARK_FILES = ("watermark.png", "watermark.json")
 _WORKSPACE_ENTRIES = frozenset(
     name.casefold() for name in (
-        MOCKUPS_DIR, PRODUCTS_DIR, DRAFTS_DIR, ARCHIVE_DIR, INFO_DIR, README_FILE,
+        MOCKUPS_DIR, PRODUCTS_DIR, DRAFTS_DIR, ARCHIVE_DIR, INFO_DIR, PRINT_DIR, README_FILE,
         TEMPLATE_FILE, HISTORY_FILE, *WATERMARK_FILES, ".auto-upload.lock", "desktop.ini",
         "thumbs.db", ".ds_store",
     )
@@ -103,6 +106,12 @@ info-images/  Optional: the pictures every listing ends with (materials, sizes,
             its own photos, at most 10. Etsy takes 20 pictures per listing, so
             each one leaves room for one mockup less.
 
+print-files/  The print file of every listing, in a folder named after its Etsy
+            listing id (print-files/4567957350/). Every draft keeps a copy of the
+            design it was made from here; add the file of any other listing in the
+            app (Listings, open the listing) or copy it into its folder yourself.
+            Without it an order of that listing cannot be printed.
+
 upload-history.json (next to these folders) records every automatic upload.
 Keep it: it is what stops `drop auto` from uploading a product twice.
 
@@ -147,6 +156,12 @@ info-images/  Istege bagli: her ilanin sonuna eklenen gorseller (malzeme, olcu,
             dosyalarini buraya koy. Her taslak bunlari kendi fotograflarindan sonra
             alir, en fazla 10. Etsy ilan basina 20 gorsel alir; her biri bir
             mockup'lik yer kaplar.
+
+print-files/  Her ilanin baski dosyasi, Etsy ilan numarasi adli bir klasorde
+            (print-files/4567957350/). Her taslak, yapildigi tasarimin bir kopyasini
+            burada tutar; baska bir ilanin dosyasini uygulamada (Ilanlar, ilani ac)
+            ekle ya da klasorune kendin kopyala. Dosyasi olmayan ilanin siparisi
+            basilamaz.
 
 upload-history.json (bu klasorlerin yaninda) her otomatik yuklemeyi kaydeder.
 Silme: `drop auto`nun ayni urunu iki kez yuklemesini engelleyen bu dosya.
@@ -375,7 +390,7 @@ def enclosing_root(path: Path) -> Path | None:
     outer: Path | None = None
     child = path
     for parent in path.parents:
-        if _named(child, SUBFOLDER_NAMES + (ARCHIVE_DIR, INFO_DIR)) and is_workspace(parent):
+        if _named(child, SUBFOLDER_NAMES + (ARCHIVE_DIR, INFO_DIR, PRINT_DIR)) and is_workspace(parent):
             outer = parent  # keep going: the outermost one wins
         child = parent
     return outer

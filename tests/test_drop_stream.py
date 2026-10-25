@@ -240,6 +240,16 @@ def test_drafts_never_carry_a_state_or_an_id(studio):
     assert fields["price"] == 21.0 and fields["shipping_profile_id"] == 55
 
 
+def test_a_draft_keeps_its_design_as_the_listings_print_file(studio):
+    ws, template = studio
+    design = _artwork(ws.products / "but-first-coffee.png") or ws.products / "but-first-coffee.png"
+    report = _run(ws, template, Client(ws))
+    item = report.items[0]
+    assert item.status == stream.OK
+    kept = ws.root / "print-files" / str(item.listing_id) / "but-first-coffee.png"
+    assert kept.read_bytes() == design.read_bytes()
+
+
 def test_research_runs_once_per_concept_and_products_prepare_in_parallel(studio):
     ws, template = studio
     for n in range(4):

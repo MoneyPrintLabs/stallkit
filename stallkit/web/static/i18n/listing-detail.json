@@ -184,7 +184,21 @@
     "cat.aprons": "Önlükler",
     "cat.keychains": "Anahtarlıklar",
     "cat.coasters": "Bardak Altlıkları",
-    "cat.baby_bodysuits": "Bebek Badileri"
+    "cat.baby_bodysuits": "Bebek Badileri",
+    "print.missing": "Baskı dosyası yok",
+    "print.missing_sub": "Sipariş gelirse basılamaz · tasarımı buraya bırakın",
+    "print.pixels": "{w}×{h} px",
+    "print.more": "+{n} dosya",
+    "print.add": "Dosya ekle",
+    "print.folder": "Klasörü aç",
+    "print.title": "Baskı dosyası · {folder}",
+    "print.uploading": "{name} yükleniyor… %{pct}",
+    "print.added": "{name} baskı dosyası olarak eklendi",
+    "print.duplicate": "{name} zaten ekli",
+    "print.failed": "{name} eklenemedi",
+    "print.too_large": "{name} {mb} MB'tan büyük: dosyayı ilanın klasörüne kendiniz kopyalayın",
+    "errors.not_print_file": "Baskı dosyası olarak resim, PDF, SVG, PSD, AI, EPS ya da ZIP ekleyin.",
+    "errors.too_large": "Buradan en fazla {max_mb} MB eklenebilir: büyük dosyayı ilanın klasörüne kendiniz kopyalayın."
   },
   "en": {
     "title": "Draft listing",
@@ -371,6 +385,20 @@
     "cat.aprons": "Aprons",
     "cat.keychains": "Keychains",
     "cat.coasters": "Coasters",
-    "cat.baby_bodysuits": "Baby Bodysuits"
+    "cat.baby_bodysuits": "Baby Bodysuits",
+    "print.missing": "No print file",
+    "print.missing_sub": "An order of it cannot be printed · drop the design here",
+    "print.pixels": "{w}×{h} px",
+    "print.more": "+{n} more",
+    "print.add": "Add file",
+    "print.folder": "Open folder",
+    "print.title": "Print file · {folder}",
+    "print.uploading": "Uploading {name}… {pct}%",
+    "print.added": "{name} added as the print file",
+    "print.duplicate": "{name} is already there",
+    "print.failed": "Could not add {name}",
+    "print.too_large": "{name} is over {mb} MB: copy it into the listing's folder yourself",
+    "errors.not_print_file": "Add an image, PDF, SVG, PSD, AI, EPS or ZIP file as the print file.",
+    "errors.too_large": "At most {max_mb} MB can be added here: copy a larger file into the listing's folder yourself."
   }
 }

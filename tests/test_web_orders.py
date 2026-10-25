@@ -682,3 +682,88 @@ def test_shipped_this_month_says_when_it_stopped_counting(web, monkeypatch):
     setup_orders(web, [make_receipt(n, shipped=True) for n in range(1, 5)])
     data = web.client.get("/api/orders/summary").json()
     assert data["shipped_month"] == 2 and data["shipped_month_partial"] is True
+
+
+def test_each_item_says_whether_its_print_file_is_kept(web):
+    receipts = [make_receipt(1), make_receipt(2), make_receipt(3)]
+    receipts[2]["transactions"][0]["is_digital"] = True
+    setup_orders(web, receipts)
+    root = web.ctx.workspace().root
+    kept = root / "print-files" / "1000001"
+    kept.mkdir(parents=True)
+    (kept / "poster.pdf").write_bytes(b"%PDF-1.4 example")
+    rows = web.client.get("/api/orders", params={"tab": "all"}).json()["rows"]
+    by_receipt = {r["receipt_id"]: r["items"][0]["print_file"] for r in rows}
+    assert by_receipt == {3000001: True, 3000002: False, 3000003: None}
+    assert all("_digital" not in r["items"][0] for r in rows)
+
+
+# --- print-ready files ---------------------------------------------------------------------
+
+
+def _tile(root, listing_id, size=(120, 120)):
+    from PIL import Image
+    folder = root / "print-files" / str(listing_id)
+    folder.mkdir(parents=True)
+    Image.new("RGB", size, (200, 120, 40)).save(folder / "tile.png")
+
+
+def _order_with(web, variations, **txn):
+    receipt = make_receipt(1)
+    receipt["transactions"][0]["variations"] = [
+        {"formatted_name": "Size", "formatted_value": v} for v in variations]
+    receipt["transactions"][0].update(txn)
+    fake, _store = setup_orders(web, [receipt])
+    fake.add("GET", f"{RECEIPTS}/{receipt['receipt_id']}", receipt)
+    return receipt["receipt_id"]
+
+
+def test_print_plan_and_make_a_roll(web):
+    from PIL import Image
+    rid = _order_with(web, ["1 Roll 23×40 in", "Traditional"], quantity=3)
+    root = web.ctx.workspace().root
+    _tile(root, 1000001)
+    plan = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50}).json()
+    [item] = plan["items"]
+    assert item["size"]["kind"] == "roll" and item["plan"]["width_px"] == 1150
+    assert item["plan"]["height_px"] == 2000 and item["plan"]["repeats"] == 29
+    assert item["file"] == "1-roll-23x40in-traditional-x3.jpg" and item["made"] is False
+    made = web.client.post(f"/api/orders/{rid}/print", json={"dpi": 50}).json()
+    assert made["items"][0]["made"] is True
+    out = root / "print-files" / "orders" / str(rid) / item["file"]
+    with Image.open(out) as image:
+        assert image.size == (1150, 2000)
+    assert [f["name"] for f in made["files"]] == [item["file"]]
+
+
+def test_print_says_why_an_item_cannot_be_made(web):
+    rid = _order_with(web, ["Traditional"])
+    plan = web.client.get(f"/api/orders/{rid}/print").json()
+    assert plan["items"][0]["problem"] == "no_size" and plan["ready"] == 0
+    resp = web.client.post(f"/api/orders/{rid}/print", json={})
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "nothing_to_print"
+    rid2 = _order_with(web, ["Mural 30×30 in"])
+    assert web.client.get(f"/api/orders/{rid2}/print").json()["items"][0]["problem"] == "no_print_file"
+    assert web.client.get(f"/api/orders/{rid2}/print", params={"dpi": 5}).status_code == 422
+
+
+def test_parse_size_and_plan():
+    from stallkit.drop import production as pr
+    assert pr.parse_size(["Mural 120x140 in"]).kind == "mural"
+    assert pr.parse_size(["SAMPLE 15×20 in"]).kind == "sample"
+    size = pr.parse_size(["60 x 90 cm"])
+    assert round(size.width_in, 1) == 23.6 and size.kind == "panel"
+    assert pr.parse_size(["Traditional"]) is None
+    big = pr.plan(pr.parse_size(["Mural 120×140 in"]), (1000, 1000))
+    assert big.mode == "cover" and big.lowered and big.width_px * big.height_px <= pr.MAX_PIXELS * 1.01
+
+
+def test_a_roll_keeps_300_dpi_and_a_small_design_is_flagged_soft():
+    from stallkit.drop import production as pr
+    roll = pr.plan(pr.parse_size(["1 Roll 23×160 in"]), (1254, 1254), dpi=300)
+    assert (roll.width_px, roll.height_px, roll.dpi, roll.lowered) == (6900, 48000, 300, False)
+    assert roll.to_dict()["soft"] is True
+    sharp = pr.plan(pr.parse_size(["1 Roll 23×160 in"]), (2300, 2300), dpi=300, repeats=3)
+    assert sharp.to_dict()["soft"] is False
+    mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=300)
+    assert mural.lowered and mural.dpi < 100

@@ -21,7 +21,7 @@ import {
   thumb,
 } from "../ui.js";
 import { icon } from "../icons.js";
-import { money } from "../format.js";
+import { bytes, money } from "../format.js";
 
 const NAV_KEY = "stallkit.listings.nav";
 const STATE_TONE = { draft: "warning", active: "success", inactive: "muted", expired: "danger", sold_out: "neutral" };
@@ -33,6 +33,8 @@ const TAG_BAD = /[^\p{L}\p{Nd}\p{Zs}\-'™©®]/gu;
 const TITLE_ONCE = ["%", ":", "&", "+"];
 const MIN_SLOTS = 10;
 const STATES = ["draft", "active", "inactive", "expired", "sold_out"];
+// What the print-file row takes (drop/printfiles.py PRINT_SUFFIXES).
+const PRINT_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.pdf,.svg,.psd,.ai,.eps,.zip";
 
 /** badge() with extra classes (the mono counters). */
 function tagBadge(opts, cls) {
@@ -377,6 +379,7 @@ export default {
         "div",
         { class: "ld-right" },
         sourceRow(d, l),
+        printRow(d, l),
         titleCard(d),
         tagsCard(d),
         facts(d, l),
@@ -422,6 +425,95 @@ export default {
         h("div", { class: "spacer" }),
         seoBtn,
       );
+    }
+
+    // The listing's print file (print-files/<id>): what an order of it is printed from.
+    // A file dropped on the row or picked with "Dosya ekle" is kept on this computer only.
+    function printRow(d, l) {
+      const p = d.print_files;
+      if (!p || (!p.needed && !p.files.length)) return null;
+      const first = p.files[0];
+      const sub = h("p", { class: "ld-source-sub" });
+      let pic;
+      let name;
+      if (first) {
+        pic = thumb({ src: first.thumb ? ctx.api.url("/api/files/thumb", { path: first.rel, w: 96, v: first.mtime }) : null, size: 32, radius: 8, icon: "file", fit: "contain" });
+        name = first.name;
+        const facts = [];
+        if (first.width && first.height) facts.push(t("print.pixels", { w: first.width, h: first.height }));
+        facts.push(bytes(first.size));
+        if (p.files.length > 1) facts.push(t("print.more", { n: p.files.length - 1 }));
+        sub.textContent = facts.join(" · ");
+      } else {
+        pic = h("span", { class: "ld-print-icon" }, icon("alert", { size: 16 }));
+        name = t("print.missing");
+        sub.textContent = t("print.missing_sub");
+      }
+      const input = h("input", { type: "file", accept: PRINT_ACCEPT, multiple: true, hidden: true });
+      const addBtn = button({ label: t("print.add"), icon: "plus", variant: first ? "ghost" : "secondary", size: "sm", onClick: () => input.click() });
+      const folderBtn = iconButton({ icon: "folder-open", title: t("print.folder"), variant: "ghost", size: "sm", onClick: () => openFolder() });
+      const row = h(
+        "div",
+        { class: cx("ld-source", "ld-print", !first && "is-missing"), title: first ? t("print.title", { folder: p.folder }) : "" },
+        pic,
+        h("div", { class: "ld-source-text" }, h("p", { class: "ld-source-name", title: name }, first ? h("span", { class: "mono" }, name) : name), sub),
+        h("div", { class: "spacer" }),
+        addBtn,
+        folderBtn,
+        input,
+      );
+      input.addEventListener("change", () => {
+        const picked = [...input.files];
+        input.value = "";
+        addFiles(picked);
+      });
+      row.addEventListener("dragover", (e) => {
+        if (![...(e.dataTransfer?.types || [])].includes("Files")) return;
+        e.preventDefault();
+        row.classList.add("is-drop");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("is-drop"));
+      row.addEventListener("drop", (e) => {
+        e.preventDefault();
+        row.classList.remove("is-drop");
+        addFiles([...(e.dataTransfer?.files || [])]);
+      });
+
+      async function addFiles(picked) {
+        if (!picked.length) return;
+        addBtn.disabled = true;
+        let latest = null;
+        for (const file of picked) {
+          if (file.size > p.max_bytes) {
+            ctx.toast({ tone: "danger", title: t("print.too_large", { name: file.name, mb: Math.floor(p.max_bytes / 1048576) }) });
+            continue;
+          }
+          try {
+            const res = await ctx.api.upload(`/api/listings/${l.id}/print-files`, file, {
+              query: { name: file.name },
+              onProgress: ({ fraction }) => {
+                sub.textContent = t("print.uploading", { name: file.name, pct: Math.round(fraction * 100) });
+              },
+            });
+            latest = res.print_files;
+            ctx.toast({ tone: "success", title: res.duplicate ? t("print.duplicate", { name: res.file }) : t("print.added", { name: res.file }) });
+          } catch (err) {
+            ctx.toast({ tone: "danger", title: t("print.failed", { name: file.name }), message: ctx.api.errorText(err, t) });
+          }
+        }
+        if (latest) d.print_files = { ...latest, needed: p.needed };
+        const next = printRow(d, l);
+        if (next) row.replaceWith(next);
+      }
+
+      async function openFolder() {
+        try {
+          await ctx.api.post(`/api/listings/${l.id}/print-files/open`);
+        } catch (err) {
+          ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) });
+        }
+      }
+      return row;
     }
 
     function openIssues(anchor) {
