@@ -529,6 +529,7 @@ export default {
         { class: "o-cell" },
         h("span", { class: "o-no num" }, `#${row.receipt_id}`),
         h("span", { class: "o-sub o-date num", title: row.created ? dateTime(row.created) : null }, row.created ? `${date(row.created)} · ${time(row.created)}` : "–"),
+        shipBy(row),
         row.status === "unshipped" ? h("button", { type: "button", class: "o-printbtn", onClick: () => openPrint(row) }, icon("layers", { size: 12 }), t("print.button")) : null,
       );
     }
@@ -582,6 +583,7 @@ export default {
           }
           const seamBad = it.seam && !it.seam.ok;
           const soft = it.plan && it.plan.soft;
+          const fixed = it.seam && it.seam.fixed && it.seam.ok;
           const warn = it.problem
             ? t(`print.problem.${it.problem}`)
             : seamBad
@@ -589,12 +591,14 @@ export default {
               : soft
                 ? t("print.soft", { x: it.plan.upscale })
                 : "";
+          const note = !warn && fixed ? t("print.seam_fixed") : "";
           return h(
             "div",
             { class: cx("o-print-item", (it.problem || seamBad || soft) && "is-warn") },
             h("strong", null, `${it.quantity}× ${it.size ? it.size.label : it.title}`, it.material ? ` · ${it.material}` : ""),
             h("span", { class: "muted" }, bits.join(" · ") || "–"),
             warn ? h("span", { class: "o-print-warn" }, icon("alert", { size: 12 }), warn) : null,
+            note ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), note) : null,
             it.made ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), it.file) : null,
           );
         });
@@ -629,6 +633,16 @@ export default {
         }
       }
       await load();
+    }
+
+    // The ship-by date of an order still to send: late and due-today orders stand out,
+    // since Etsy counts a late shipment against the shop.
+    function shipBy(row) {
+      if (row.status !== "unshipped" || !row.ship_by) return null;
+      const days = Math.floor((row.ship_by * 1000 - Date.now()) / 86400000);
+      const tone = days < 0 ? "late" : days <= 1 ? "soon" : "ok";
+      const text = days < 0 ? t("ship.late", { n: -days }) : days === 0 ? t("ship.today") : days === 1 ? t("ship.tomorrow") : t("ship.by", { date: date(row.ship_by) });
+      return h("span", { class: cx("o-shipby", `is-${tone}`), title: t("ship.title", { date: date(row.ship_by) }) }, icon("clock", { size: 11 }), text);
     }
 
     function renderBuyer(row) {
@@ -1172,6 +1186,11 @@ export default {
           return;
         }
         if (data.tab === "unshipped" && !data.q && Array.isArray(data.ids)) S.waiting = data.ids;
+        // New orders get their print files before the seller looks (a background job).
+        if (S.waiting && !S.autoPrint) {
+          S.autoPrint = true;
+          ctx.api.post("/api/orders/print-waiting", { dpi: savedDpi() }).catch(() => {});
+        }
         for (const row of data.rows) remember(row);
         // The carriers and numbers saved last time, before the first rows show (asked
         // after the list, so the server checks them against the waiting list it read).

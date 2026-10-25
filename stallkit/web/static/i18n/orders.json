@@ -152,7 +152,16 @@
     "print.all_progress": "{i}/{n} hazırlanıyor…",
     "print.all_done": "{n} baskı dosyası hazır",
     "print.all_skipped": "{n} siparişin ilanında baskı dosyası yok ya da ölçü okunamadı: onları tek tek açın",
-    "print.invoice": "Fatura (ürün görselli)"
+    "print.invoice": "Fatura (ürün görselli)",
+    "job.print": "Baskı dosyaları hazırlanıyor",
+    "notify.print_ready": "{n} sipariş için baskı dosyası otomatik hazırlandı",
+    "notify.print_missing": "{n} siparişin ilanında baskı dosyası yok: ilanın sayfasından ekleyin",
+    "print.seam_fixed": "Desenin kenarları tutmuyordu: dikişsiz hâle getirildi (tasarım dosyanız değişmedi)",
+    "ship.late": "{n} gün gecikti",
+    "ship.today": "Bugün kargoda olmalı",
+    "ship.tomorrow": "Yarın kargoda olmalı",
+    "ship.by": "Kargo: {date}",
+    "ship.title": "En geç {date} tarihinde kargoya verilmeli: geç gönderim mağaza puanını düşürür"
   },
   "en": {
     "title": "Orders",
@@ -307,6 +316,15 @@
     "print.all_progress": "Preparing {i}/{n}…",
     "print.all_done": "{n} print files ready",
     "print.all_skipped": "{n} orders have no print file on their listing or no readable size: open them one by one",
-    "print.invoice": "Invoice sheet (with the product picture)"
+    "print.invoice": "Invoice sheet (with the product picture)",
+    "job.print": "Preparing print files",
+    "notify.print_ready": "Print files made for {n} orders",
+    "notify.print_missing": "{n} orders have no print file on their listing: add it on the listing's page",
+    "print.seam_fixed": "The pattern's edges did not meet: made seamless (your design file is unchanged)",
+    "ship.late": "{n} days late",
+    "ship.today": "Ship today",
+    "ship.tomorrow": "Ship by tomorrow",
+    "ship.by": "Ship by {date}",
+    "ship.title": "Must ship by {date}: a late shipment lowers the shop's rating"
   }
 }

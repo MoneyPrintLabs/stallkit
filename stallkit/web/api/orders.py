@@ -13,6 +13,8 @@
     GET  /api/orders/{id}/print?dpi=&repeats=  what each item's print-ready file would be
     POST /api/orders/{id}/print {dpi?, repeats?} make them (print-files/orders/<id>/; local)
     POST /api/orders/{id}/print/open         show that folder
+    POST /api/orders/print-waiting {dpi?}    job "print": make them for every waiting order
+                                             that has none yet (the page asks when it opens)
 
 Etsy facts (checked against the OpenAPI spec, 3.0.0): getShopReceipts filters
 was_paid / was_shipped / was_delivered / was_canceled (booleans), sort_on
@@ -127,6 +129,7 @@ def register(r: Router, ctx: AppContext) -> None:
     r.get("/api/orders/{id:int}/print", api.print_plan)
     r.post("/api/orders/{id:int}/print", api.make_print)
     r.post("/api/orders/{id:int}/print/open", api.open_print)
+    r.post("/api/orders/print-waiting", api.print_waiting)
 
 
 # --- pure helpers (tested directly) -----------------------------------------------------
@@ -220,6 +223,9 @@ def flatten(receipt: dict[str, Any], tab: str | None = None) -> dict[str, Any]:
         "shipments": shipments,
         "status": receipt_status(receipt, tab),
         "is_gift": bool(receipt.get("is_gift")),
+        # When it must ship by (Etsy counts a late shipment against the shop's rating).
+        "ship_by": receipt.get("expected_ship_date")
+        if isinstance(receipt.get("expected_ship_date"), (int, float)) else None,
     }
 
 
@@ -518,17 +524,27 @@ def _print_items(root: Any, receipt: dict[str, Any], *, dpi: int,
         except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
             item["problem"] = item["problem"] or "unreadable"
             continue
-        across, down = production.seam_ratios(image)
         item["source"] = {"name": design.name, "rel": design.relative_to(root).as_posix(),
                           "width": image.width, "height": image.height,
                           "mtime": int(design.stat().st_mtime)}
         if size is None:
             continue
         made = production.plan(size, image.size, dpi=dpi, repeats=repeats)
-        item.update(_image=image, _plan=made, _size=size, plan=made.to_dict())
         if made.mode == "pattern":
-            item["seam"] = {"across": across, "down": down,
-                            "ok": max(across, down) < production.SEAM_WARN}
+            # A pattern whose edges do not meet shows a line where it repeats: its edges
+            # are blended (the design file itself is never changed) and re-measured.
+            across, down = production.seam_ratios(image)
+            seam: dict[str, Any] = {"across": across, "down": down, "fixed": False,
+                                    "ok": max(across, down) < production.SEAM_WARN}
+            if not seam["ok"]:
+                repaired = production.make_seamless(image)
+                a2, d2 = production.seam_ratios(repaired)
+                if max(a2, d2) < max(across, down):
+                    image = repaired
+                    seam.update(fixed=True, before={"across": across, "down": down},
+                                across=a2, down=d2, ok=max(a2, d2) < production.SEAM_WARN)
+            item["seam"] = seam
+        item.update(_image=image, _plan=made, _size=size, plan=made.to_dict())
         item["file"] = production.file_name(index, made, material, quantity)
         item["made"] = (folder / item["file"]).is_file()
     return out
@@ -776,18 +792,74 @@ class OrdersApi:
         if not any(i["plan"] for i in items):
             raise ApiError(422, "nothing_to_print", "No item of this order can be made yet.")
         folder = production.order_folder(root, receipt_id)
+        try:
+            self._make_files(receipt, items, folder)
+        except (OSError, ValueError, MemoryError) as exc:
+            raise ApiError(500, "internal", f"Could not make the files: {exc}") from exc
+        return self._print_answer(receipt_id, items, dpi)
+
+    def _make_files(self, receipt: dict[str, Any], items: list[dict[str, Any]],
+                    folder: Any) -> int:
+        """Render and save every item that has a plan, then the invoice sheet. How many
+        files were made."""
+        from ...drop import production
+
+        made_count = 0
         for item in items:
             made = item.get("_plan")
             if made is None:
                 continue
-            try:
-                production.save(production.render(item["_image"], made),
-                                folder / item["file"], made.dpi)
-            except (OSError, ValueError, MemoryError) as exc:
-                raise ApiError(500, "internal", f"Could not make {item['file']}: {exc}") from exc
+            production.save(production.render(item["_image"], made), folder / item["file"],
+                            made.dpi)
             item["made"] = True
+            made_count += 1
         self._write_invoice(receipt, items, folder)
-        return self._print_answer(receipt_id, items, dpi)
+        return made_count
+
+    def print_waiting(self, req: Request) -> dict[str, Any]:
+        """Prepare, in the background, the print files of every order waiting to ship that
+        has none yet (an order whose invoice sheet exists is done). The page asks when it
+        opens, so a new order's files are ready before the seller looks. Local only."""
+        from ...drop import production
+
+        dpi, repeats = self._print_args(req.json_object())
+        for job in self.ctx.jobs.active(lane="read"):
+            if job.kind == "print":
+                return job.summary()
+        client = self.ctx.client()
+        root = self.ctx.workspace_root()
+
+        def work(job: Any) -> dict[str, Any]:
+            receipts, _more = self._scan(client, "unshipped")
+            prepared = files = lacking = 0
+            for n, receipt in enumerate(receipts, start=1):
+                rid = receipt.get("receipt_id")
+                if not isinstance(rid, int):
+                    continue
+                folder = production.order_folder(root, rid)
+                if (folder / f"order-{rid}-invoice.pdf").is_file():
+                    continue
+                items = _print_items(root, receipt, dpi=dpi, repeats=repeats)
+                if not any(i["plan"] for i in items):
+                    lacking += 1
+                    continue
+                try:
+                    files += self._make_files(receipt, items, folder)
+                    prepared += 1
+                except (OSError, ValueError, MemoryError):
+                    log.warning("could not prepare order %s", rid, exc_info=True)
+                job.progress(n, len(receipts), label=str(rid))
+            if prepared:
+                self.ctx.notify("orders", "print_ready", {"n": prepared}, tone="success",
+                                link="/siparisler")
+            if lacking:
+                self.ctx.notify("orders", "print_missing", {"n": lacking}, tone="warning",
+                                link="/siparisler", replace=True)
+            return {"prepared": prepared, "files": files, "lacking": lacking}
+
+        job = self.ctx.jobs.start("print", "orders:job.print", work, params={"n": 0},
+                                  cancellable=False, lane="read")
+        return job.summary()
 
     def _write_invoice(self, receipt: dict[str, Any], items: list[dict[str, Any]],
                        folder: Any) -> None:

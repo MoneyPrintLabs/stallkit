@@ -788,3 +788,42 @@ def test_the_invoice_sheet_holds_the_order_and_survives_odd_characters():
     assert "Sule Öztürk".encode("cp1252") in page and b"#42" in page and b"2 x US$16.00" in page
     assert b"US$32.00" in page and b"/Im1 Do" in page
     assert invoice.money({"amount": 5, "divisor": 100, "currency_code": "TRY"}) == "TRY 0.05"
+
+
+def test_a_tile_whose_edges_do_not_meet_is_made_seamless():
+    import random
+    from PIL import Image
+    from stallkit.drop import production as pr
+    random.seed(3)
+    tile = Image.new("RGB", (240, 240))
+    tile.putdata([(int(255 * (i % 240) / 240), 90 + random.randrange(40), 60) for i in range(240 * 240)])
+    before = max(pr.seam_ratios(tile))
+    after = max(pr.seam_ratios(pr.make_seamless(tile)))
+    assert before > pr.SEAM_WARN and after < pr.SEAM_WARN and after < before
+    assert pr.make_seamless(tile).size == tile.size
+
+
+def test_an_order_with_a_broken_tile_is_repaired_and_says_so(web):
+    from PIL import Image
+    rid = _order_with(web, ["1 Roll 23×40 in", "Traditional"])
+    root = web.ctx.workspace().root
+    folder = root / "print-files" / "1000001"
+    folder.mkdir(parents=True)
+    tile = Image.new("RGB", (200, 200))
+    tile.putdata([(int(255 * (i % 200) / 200), 100, 80) for i in range(200 * 200)])
+    tile.save(folder / "tile.png")
+    seam = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50}).json()["items"][0]["seam"]
+    assert seam["fixed"] is True and seam["ok"] is True and seam["before"]["across"] > seam["across"]
+
+
+def test_waiting_orders_are_prepared_in_the_background_once(web):
+    rid = _order_with(web, ["1 Roll 23×40 in", "Traditional"])
+    root = web.ctx.workspace().root
+    _tile(root, 1000001)
+    job = web.client.post("/api/orders/print-waiting", json={"dpi": 50}).json()
+    final = wait_for_job(web, job["id"], timeout=30)
+    assert final["status"] == "done" and final["result"]["prepared"] == 1
+    assert (root / "print-files" / "orders" / str(rid) / f"order-{rid}-invoice.pdf").is_file()
+    again = wait_for_job(web, web.client.post("/api/orders/print-waiting", json={"dpi": 50}).json()["id"],
+                         timeout=30)
+    assert again["result"]["prepared"] == 0  # an order that has its sheet is done
