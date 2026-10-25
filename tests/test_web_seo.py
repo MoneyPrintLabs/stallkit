@@ -36,9 +36,11 @@ def _listing(listing_id, title, tags, *, description=DESCRIPTION, materials=("st
         "state": state,
         "url": f"https://www.etsy.com/listing/{listing_id}",
         "should_auto_renew": True,
+        # Ten photos with alt text and a large main one: nothing for the photo checks to say.
         "images": [
-            {"rank": 2, "url_170x135": f"https://i.example.test/{listing_id}-2.jpg"},
-            {"rank": 1, "url_170x135": f"https://i.example.test/{listing_id}-1.jpg"},
+            {"rank": n, "alt_text": "mug on a table", "full_width": 3000, "full_height": 3000,
+             "url_170x135": f"https://i.example.test/{listing_id}-{n}.jpg"}
+            for n in range(10, 0, -1)
         ],
     }
 

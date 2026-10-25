@@ -198,7 +198,11 @@
     "print.failed": "{name} eklenemedi",
     "print.too_large": "{name} {mb} MB'tan büyük: dosyayı ilanın klasörüne kendiniz kopyalayın",
     "errors.not_print_file": "Baskı dosyası olarak resim, PDF, SVG, PSD, AI, EPS ya da ZIP ekleyin.",
-    "errors.too_large": "Buradan en fazla {max_mb} MB eklenebilir: büyük dosyayı ilanın klasörüne kendiniz kopyalayın."
+    "errors.too_large": "Buradan en fazla {max_mb} MB eklenebilir: büyük dosyayı ilanın klasörüne kendiniz kopyalayın.",
+    "issue.images.few": "Fotoğraf sayısı çok az: alıcı fotoğrafa bakıp karar verir; 10 ve üzeri fotoğraflı ilanlar daha çok satar.",
+    "issue.images.some": "10 ve üzeri fotoğraf (oda görüntüsü, yakın plan, ölçüler) daha çok satar.",
+    "issue.images.alt": "Bazı fotoğraflarda alt metin yok; arama ve ekran okuyucular bunu okur.",
+    "issue.images.small": "Ana fotoğraf, kısa kenarda en az 2000 px olmalı ki yakınlaştırınca net görünsün."
   },
   "en": {
     "title": "Draft listing",
@@ -399,6 +403,10 @@
     "print.failed": "Could not add {name}",
     "print.too_large": "{name} is over {mb} MB: copy it into the listing's folder yourself",
     "errors.not_print_file": "Add an image, PDF, SVG, PSD, AI, EPS or ZIP file as the print file.",
-    "errors.too_large": "At most {max_mb} MB can be added here: copy a larger file into the listing's folder yourself."
+    "errors.too_large": "At most {max_mb} MB can be added here: copy a larger file into the listing's folder yourself.",
+    "issue.images.few": "Too few photos: buyers decide on photos, and listings with 10 or more sell better.",
+    "issue.images.some": "10 or more photos (the room, the close-up, the sizes) sell better.",
+    "issue.images.alt": "Some photos have no alt text, which search and screen readers read.",
+    "issue.images.small": "The main photo should be at least 2000 px on its short side so it zooms sharp."
   }
 }

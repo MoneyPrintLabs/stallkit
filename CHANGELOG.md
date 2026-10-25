@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`POST /api/orders/print-waiting`).
   - **Ship-by date.** Each order still to send shows when it must ship by: orders due today
     or tomorrow are amber, late ones red (Etsy counts a late shipment against the shop).
+  - **SEO audit: photos.** Four checks on a listing read with its images: fewer than 5
+    photos is a warning (`images.few`), fewer than 10 a note (`images.some`), photos without
+    alt text a note (`images.alt`), and a main photo under 2000 px on its short side a note
+    (`images.small`). Nothing is said about a listing read without its images.
 
 ## [0.3.3] — 2026-10-04
 

@@ -45,6 +45,9 @@ STOPWORDS = {
 _WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)?|\d+", re.UNICODE)
 
 SEVERITY_WEIGHT = {"error": 25, "warn": 10, "info": 3}
+# Photos: fewer than PHOTOS_MIN is a warning, fewer than PHOTOS_GOOD a note; the main
+# photo should be at least MAIN_PHOTO_MIN_EDGE px on its short side.
+PHOTOS_MIN, PHOTOS_GOOD, MAIN_PHOTO_MIN_EDGE = 5, 10, 2000
 
 
 @dataclass
@@ -257,6 +260,34 @@ def audit_listing(listing: dict[str, Any], shop: ShopAudit | None = None) -> Aud
     # --- everything else --------------------------------------------------------
     if not materials:
         add(Issue("materials.missing", "info", "no materials set — a free, indexed attribute"))
+    # --- photos (only when the listing was read with its images) ------------------
+    images = listing.get("images") if isinstance(listing.get("images"), list) else None
+    if images is not None:
+        shown = [i for i in images if isinstance(i, dict)]
+        if len(shown) < PHOTOS_MIN:
+            add(Issue("images.few", "warn",
+                      f"only {len(shown)} photo{'s' if len(shown) != 1 else ''}: buyers decide on "
+                      f"photos, and listings with {PHOTOS_GOOD} or more convert better",
+                      {"n": len(shown), "good": PHOTOS_GOOD}))
+        elif len(shown) < PHOTOS_GOOD:
+            add(Issue("images.some", "info",
+                      f"{len(shown)} photos; {PHOTOS_GOOD} or more (the room, the close-up, the "
+                      "sizes) sell better",
+                      {"n": len(shown), "good": PHOTOS_GOOD}))
+        no_alt = [i for i in shown if not str(i.get("alt_text") or "").strip()]
+        if shown and no_alt:
+            add(Issue("images.alt", "info",
+                      f"{len(no_alt)} of {len(shown)} photos have no alt text, which search "
+                      "and screen readers read",
+                      {"n": len(no_alt), "total": len(shown)}))
+        first = shown[0] if shown else {}
+        edge = min(first.get("full_width") or 0, first.get("full_height") or 0)
+        if edge and edge < MAIN_PHOTO_MIN_EDGE:
+            add(Issue("images.small", "info",
+                      f"the main photo is {first.get('full_width')}×{first.get('full_height')} px; "
+                      f"Etsy recommends at least {MAIN_PHOTO_MIN_EDGE} px on the short side so it "
+                      "zooms and shows sharp",
+                      {"edge": edge, "min": MAIN_PHOTO_MIN_EDGE}))
     if listing.get("should_auto_renew") is False:
         add(Issue("renew.off", "info", "auto-renew is off; the listing will expire in 4 months"))
     if listing.get("state") == "expired":
