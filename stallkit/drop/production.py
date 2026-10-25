@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 
 from . import printfiles
 from .workspace import IMAGE_SUFFIXES, PRINT_DIR
@@ -47,6 +47,7 @@ JPEG_LIMIT = 65_000  # JPEG's own limit is 65535 px a side
 # it repeats (about 1 for a seamless tile).
 SEAM_WARN = 1.8
 ORDERS_DIR = "orders"
+_SHARPEN = ImageFilter.UnsharpMask(radius=1.6, percent=70, threshold=2)
 
 KINDS = ("roll", "mural", "sample", "panel")
 _SIZE = re.compile(
@@ -135,6 +136,37 @@ def seam_ratios(tile: Image.Image) -> tuple[float, float]:
     return round(across, 2), round(down, 2)
 
 
+def _profile(length: int, band: int, other: int, horizontal: bool) -> Image.Image:
+    """A mask of length x other that is 0 at both ends along its length and 1 from `band`
+    pixels in (a smooth ramp between)."""
+    values = []
+    for i in range(length):
+        edge = min(i, length - 1 - i)
+        t = min(1.0, edge / band)
+        values.append(round(255 * t * t * (3 - 2 * t)))
+    line = Image.new("L", (length, 1))
+    line.putdata(values)
+    return line.resize((length, other), Image.NEAREST) if horizontal else \
+        line.transpose(Image.TRANSPOSE).resize((other, length), Image.NEAREST)
+
+
+def make_seamless(tile: Image.Image, band: float = 0.08) -> Image.Image:
+    """The tile with its edges made to meet.
+
+    The tile is shifted half its size, wrapping round: its edges are then the neighbours
+    of its middle, so they continue each other. The original is faded into that shifted
+    copy over `band` of its width and height at the edges, and stays untouched in the
+    middle. The pattern's own motifs are kept; only a thin strip along each edge is a
+    cross-fade.
+    """
+    width, height = tile.size
+    shifted = ImageChops.offset(tile, width // 2, height // 2)
+    bx, by = max(2, int(width * band)), max(2, int(height * band))
+    across = _profile(width, bx, height, True)
+    down = _profile(height, by, width, False)
+    return Image.composite(tile, shifted, ImageChops.multiply(across, down))
+
+
 def open_design(path: Path) -> Image.Image:
     """The print file as RGB (transparency on white), upright."""
     with warnings.catch_warnings():
@@ -197,7 +229,11 @@ def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
          roll_width_in: float = ROLL_WIDTH_IN) -> Plan:
     """What the file of an item of `size` is, from a design of `tile_size` pixels."""
     dpi = max(MIN_DPI, min(MAX_DPI, int(dpi)))
-    mode = mode or ("cover" if size.kind == "mural" else "pattern")
+    if mode is None:
+        # A mural of a near-square design is that design repeated (the listing sells the
+        # same tile as rolls and as murals); a wide or tall picture covers the wall.
+        ratio = tile_size[0] / max(1, tile_size[1])
+        mode = "cover" if size.kind == "mural" and not 0.8 <= ratio <= 1.25 else "pattern"
     notes: list[str] = []
     lowered = False
     limit = MAX_PATTERN_PIXELS if mode == "pattern" else MAX_PIXELS
@@ -222,16 +258,21 @@ def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
 
 
 def render(design: Image.Image, item: Plan) -> Image.Image:
-    """The file of one item."""
+    """The file of one item. A design enlarged to fill it is sharpened a little: Lanczos
+    keeps edges clean but leaves them soft, and a printer shows that."""
+    soft = item.upscale > 1.2
     if item.mode == "cover":
-        return ImageOps.fit(design, (item.width_px, item.height_px), Image.LANCZOS,
-                            centering=(0.5, 0.5))
+        fitted = ImageOps.fit(design, (item.width_px, item.height_px), Image.LANCZOS,
+                              centering=(0.5, 0.5))
+        return fitted.filter(_SHARPEN) if soft else fitted
     # One roll's width of `repeats` tiles, made exactly that wide: the next roll starts
     # where the pattern starts again, so the two meet without a step.
     count, span = item.repeats, item.span_px
     tile_w = math.ceil(span / count)
     tile_h = max(1, round(design.height * span / count / design.width))
     tile = design.resize((tile_w, tile_h), Image.LANCZOS)
+    if soft:
+        tile = tile.filter(_SHARPEN)
     strip = Image.new("RGB", (tile_w * count, tile_h), "white")
     for i in range(count):
         strip.paste(tile, (i * tile_w, 0))

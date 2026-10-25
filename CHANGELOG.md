@@ -42,6 +42,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Opening it makes the files at once (one click: *Siparişi hazırla*), at the 150 or 300 dpi
     last chosen, and **Siparişleri hazırla** in the header does the same for every order
     waiting to ship, naming the ones that still lack a print file.
+  - **The order's invoice sheet.** Making an order's files also writes
+    `order-<id>-invoice.pdf` beside them: the sheet Etsy prints for the order (ship-to, order
+    number and date, items with their variations, totals), made from the order itself, with
+    the picture of each item sold at the bottom right, at the proportions of the size
+    ordered (a long roll shows its top). It is what the printer is sent with the print file.
+  - **Seamless patterns.** A pattern whose opposite edges do not meet (a line would show
+    where it repeats) is repaired in the order's file: the tile is shifted half its size and
+    cross-faded into itself along the edges, then measured again. The dialog says so; the
+    design file itself is never changed. A design enlarged more than 1.2× to fill its file is
+    sharpened a little, and one enlarged more than 1.5× is flagged.
+  - **Murals of a tile.** A mural size ordered from a near-square (tile) design repeats the
+    pattern at the same scale as a roll; a wide or tall picture still covers the wall.
+  - **Ready before you look.** When Siparişler opens, a background job makes the print files
+    and invoice sheet of every order waiting to ship that has none yet, and the bell says how
+    many were made and how many lack a print file on their listing
+    (`POST /api/orders/print-waiting`).
+  - **Ship-by date.** Each order still to send shows when it must ship by: orders due today
+    or tomorrow are amber, late ones red (Etsy counts a late shipment against the shop).
+  - **SEO audit: photos.** Four checks on a listing read with its images: fewer than 5
+    photos is a warning (`images.few`), fewer than 10 a note (`images.some`), photos without
+    alt text a note (`images.alt`), and a main photo under 2000 px on its short side a note
+    (`images.small`). Nothing is said about a listing read without its images.
 
 ## [0.3.3] — 2026-10-04
 

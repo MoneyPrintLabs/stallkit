@@ -374,3 +374,18 @@ def test_the_seo_page_researches_again_instead_of_showing_an_old_report(web):
     assert [t["tag"] for t in data["tags"]] == ["coffee lover gift", "pottery"]
     again = web.client.get("/api/seo/research", params={"keyword": "stoneware mug"}).json()
     assert again["cached"] is True and again["tags"] == data["tags"]
+
+
+def test_photo_checks_need_the_listings_images_and_name_what_is_thin():
+    from stallkit import seo
+    base = {"listing_id": 1, "title": "Leopard Jungle Wallpaper, Peel and Stick", "tags": ["a b"],
+            "description": "x" * 200}
+    codes = lambda listing: {i.code for i in seo.audit_listing(listing).issues}  # noqa: E731
+    assert not {c for c in codes(base) if c.startswith("images.")}  # read without images: silent
+    photo = {"rank": 1, "alt_text": "", "full_width": 1200, "full_height": 1600}
+    few = codes({**base, "images": [photo, photo]})
+    assert {"images.few", "images.alt", "images.small"} <= few
+    some = codes({**base, "images": [{**photo, "alt_text": "x", "full_width": 3000, "full_height": 3000}] * 7})
+    assert "images.some" in some and "images.few" not in some and "images.alt" not in some
+    good = codes({**base, "images": [{**photo, "alt_text": "x", "full_width": 3000, "full_height": 3000}] * 10})
+    assert not {c for c in good if c.startswith("images.")}

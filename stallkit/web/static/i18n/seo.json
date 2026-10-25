@@ -8,7 +8,6 @@
     "tools.title": "Liste seçenekleri",
     "tools.title_issues": "Liste seçenekleri · {n} mağaza geneli sorun",
     "tools.title_issues_one": "Liste seçenekleri · {n} mağaza geneli sorun",
-
     "audit.title": "Denetim",
     "audit.sub": "{n} ilan tarandı · {m} ilanda düzeltme önerisi var",
     "audit.sub_one": "{n} ilan tarandı · {m} ilanda düzeltme önerisi var",
@@ -33,26 +32,22 @@
     "search.active_one": "“{q}” araması: {n} ilan",
     "list.label": "Puanlanan ilanlar",
     "show_more": "{n} ilan daha göster",
-
     "fix": "Düzelt",
     "ready": "Hazır",
     "ready_hint": "Önemli bir sorun yok. Yine de etiket veya malzeme ekleyebilirsiniz.",
     "no_issues": "Sorun bulunamadı",
     "ready_minor": "Önemli sorun yok",
     "more_issues": "+{n}",
-
     "empty.active": "Aktif ilanınız yok",
     "empty.draft": "Taslak ilanınız yok",
     "empty.msg": "Etsy'de ilan oluşturduğunuzda burada puanlanır.",
     "empty.search": "“{q}” ile eşleşen ilan yok",
-
     "setup.keys.title": "Önce Etsy anahtarlarınızı girin",
     "setup.keys.msg": "SEO denetimi ve etiket araştırması Etsy API anahtarıyla çalışır.",
     "setup.connect.title": "Mağazanızı bağlayın",
     "setup.connect.msg": "İlanlarınızı puanlamak için mağazanıza bağlanın. Sağdaki etiket araştırması bağlantı olmadan da çalışır.",
     "setup.action": "Mağaza Bağlantısı'na git",
     "setup.research": "Etiket araştırması için Etsy API anahtarı gerekiyor.",
-
     "shop.title": "Mağaza geneli",
     "shop.sub": "Tek tek ilanlarda görünmeyen, ilanlar arası sorunlar",
     "shop.common_tags": "En yaygın ortak etiketler",
@@ -61,7 +56,6 @@
     "shop_issue.shop.tag_overlap_one": "{tags} etiket, {listings} ilanınızın en az {cutoff} tanesinde geçiyor. Mağazanızı bu aramalara sokuyor ama ilanlarınızı birbirinden ayırmıyor; Etsy bir aramada aynı mağazadan nadiren iki ilan gösterir.",
     "shop_issue.shop.too_alike": "{crowded} ilanın, diğer ilanlarınızda olmayan 5'ten az etiketi var. Bu ilanlar yeni alıcıya ulaşmak yerine birbiriyle yarışıyor.",
     "shop_issue.shop.too_alike_one": "{crowded} ilanın, diğer ilanlarınızda olmayan 5'ten az etiketi var. Bu ilan yeni alıcıya ulaşmak yerine diğer ilanlarınızla yarışıyor.",
-
     "issue.title.missing": "Başlık boş",
     "issue.title.too_long": "Başlık {title_len} karakter · en fazla {max}",
     "issue.title.too_short": "Başlık sadece {title_len} karakter",
@@ -90,7 +84,6 @@
     "issue.materials.missing": "Malzeme alanı eksik",
     "issue.renew.off": "Otomatik yenileme kapalı",
     "issue.state.expired": "İlanın süresi dolmuş",
-
     "research.title": "Rakip etiket analizi",
     "research.sub": "Etsy aramasında ilk {n} ilan",
     "research.placeholder": "Anahtar kelime, ör. ceramic mug",
@@ -115,7 +108,6 @@
     "research.cached": "Son 7 günde yapılmış aramadan",
     "research.refresh": "Aramayı yenile",
     "research.error": "Arama yapılamadı",
-
     "fix.title": "Önerilen düzeltme",
     "fix.sub": "Yalnızca işaretli değişiklikler Etsy'ye gider. Önerileri gözden geçirip ürününüze uyanları seçin.",
     "fix.state.active": "Aktif",
@@ -165,7 +157,11 @@
     "fix.failed": "İlan güncellenemedi",
     "fix.stale": "İlan denetimden sonra Etsy'de değişmiş",
     "fix.stale_msg": "Hiçbir şey gönderilmedi. Liste yenilendi; düzeltmeyi yeniden gözden geçirin.",
-    "errors.seo_stale": "İlan denetimden sonra Etsy'de değişmiş. Liste yenilendi; düzeltmeyi yeniden gözden geçirin."
+    "errors.seo_stale": "İlan denetimden sonra Etsy'de değişmiş. Liste yenilendi; düzeltmeyi yeniden gözden geçirin.",
+    "issue.images.few": "Çok az fotoğraf var",
+    "issue.images.some": "Fotoğraf sayısı artırılabilir",
+    "issue.images.alt": "Fotoğraflarda alt metin yok",
+    "issue.images.small": "Ana fotoğraf küçük"
   },
   "en": {
     "title": "SEO",
@@ -176,7 +172,6 @@
     "tools.title": "List options",
     "tools.title_issues": "List options · {n} shop-wide issues",
     "tools.title_issues_one": "List options · {n} shop-wide issue",
-
     "audit.title": "Audit",
     "audit.sub": "{n} listings scanned · {m} with a suggested fix",
     "audit.sub_one": "{n} listing scanned · {m} with a suggested fix",
@@ -201,26 +196,22 @@
     "search.active_one": "Search “{q}”: {n} listing",
     "list.label": "Scored listings",
     "show_more": "Show {n} more",
-
     "fix": "Fix",
     "ready": "Ready",
     "ready_hint": "Nothing important to fix. You can still add tags or materials.",
     "no_issues": "No issues found",
     "ready_minor": "Nothing important",
     "more_issues": "+{n}",
-
     "empty.active": "You have no active listings",
     "empty.draft": "You have no drafts",
     "empty.msg": "Listings you create on Etsy are scored here.",
     "empty.search": "No listing matches “{q}”",
-
     "setup.keys.title": "Add your Etsy keys first",
     "setup.keys.msg": "The SEO audit and the tag research work with your Etsy API key.",
     "setup.connect.title": "Connect your shop",
     "setup.connect.msg": "Connect your shop to score your listings. The tag research on the right works without it.",
     "setup.action": "Go to Shop connection",
     "setup.research": "Tag research needs your Etsy API key.",
-
     "shop.title": "Whole shop",
     "shop.sub": "Problems between listings that no single listing shows",
     "shop.common_tags": "Most shared tags",
@@ -229,7 +220,6 @@
     "shop_issue.shop.tag_overlap_one": "{tags} tag appears on at least {cutoff} of your {listings} listings. It gets your shop into those searches, but it does not tell your listings apart, and Etsy rarely shows two listings from one shop in a search.",
     "shop_issue.shop.too_alike": "{crowded} listings have fewer than 5 tags that your other listings do not already use. They compete with each other instead of reaching new buyers.",
     "shop_issue.shop.too_alike_one": "{crowded} listing has fewer than 5 tags that your other listings do not already use. It competes with them instead of reaching new buyers.",
-
     "issue.title.missing": "Title is empty",
     "issue.title.too_long": "Title is {title_len} characters · max {max}",
     "issue.title.too_short": "Title is only {title_len} characters",
@@ -258,7 +248,6 @@
     "issue.materials.missing": "Materials missing",
     "issue.renew.off": "Auto-renew is off",
     "issue.state.expired": "Listing has expired",
-
     "research.title": "Competitor tag analysis",
     "research.sub": "Top {n} listings in Etsy search",
     "research.placeholder": "Keyword, e.g. ceramic mug",
@@ -283,7 +272,6 @@
     "research.cached": "From a search in the last 7 days",
     "research.refresh": "Search again",
     "research.error": "The search failed",
-
     "fix.title": "Suggested fix",
     "fix.sub": "Only the ticked changes go to Etsy. Look through the suggestions and pick the ones that fit your product.",
     "fix.state.active": "Active",
@@ -333,6 +321,10 @@
     "fix.failed": "Could not update the listing",
     "fix.stale": "The listing changed on Etsy after the audit",
     "fix.stale_msg": "Nothing was sent. The list was refreshed; please review the fix again.",
-    "errors.seo_stale": "The listing changed on Etsy after the audit. The list was refreshed; please review the fix again."
+    "errors.seo_stale": "The listing changed on Etsy after the audit. The list was refreshed; please review the fix again.",
+    "issue.images.few": "Too few photos",
+    "issue.images.some": "More photos would sell better",
+    "issue.images.alt": "Photos have no alt text",
+    "issue.images.small": "Main photo is small"
   }
 }

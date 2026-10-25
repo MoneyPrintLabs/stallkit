@@ -810,3 +810,19 @@
 .o-print-done {
   color: var(--success);
 }
+
+.page-orders .o-shipby {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.page-orders .o-shipby.is-soon {
+  color: var(--warning);
+  font-weight: 600;
+}
+.page-orders .o-shipby.is-late {
+  color: var(--danger, #ef6a6a);
+  font-weight: 600;
+}

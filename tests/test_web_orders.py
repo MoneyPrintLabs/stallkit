@@ -733,7 +733,10 @@ def test_print_plan_and_make_a_roll(web):
     out = root / "print-files" / "orders" / str(rid) / item["file"]
     with Image.open(out) as image:
         assert image.size == (1150, 2000)
-    assert [f["name"] for f in made["files"]] == [item["file"]]
+    assert [f["name"] for f in made["files"]] == [item["file"], f"order-{rid}-invoice.pdf"]
+    invoice = (root / "print-files" / "orders" / str(rid) / f"order-{rid}-invoice.pdf").read_bytes()
+    assert invoice.startswith(b"%PDF-1.4") and invoice.rstrip().endswith(b"%%EOF")
+    assert b"/DCTDecode" in invoice  # the product's picture is on the sheet
 
 
 def test_print_says_why_an_item_cannot_be_made(web):
@@ -754,7 +757,7 @@ def test_parse_size_and_plan():
     size = pr.parse_size(["60 x 90 cm"])
     assert round(size.width_in, 1) == 23.6 and size.kind == "panel"
     assert pr.parse_size(["Traditional"]) is None
-    big = pr.plan(pr.parse_size(["Mural 120×140 in"]), (1000, 1000))
+    big = pr.plan(pr.parse_size(["Mural 120×140 in"]), (1600, 1000))
     assert big.mode == "cover" and big.lowered and big.width_px * big.height_px <= pr.MAX_PIXELS * 1.01
 
 
@@ -765,5 +768,68 @@ def test_a_roll_keeps_300_dpi_and_a_small_design_is_flagged_soft():
     assert roll.to_dict()["soft"] is True
     sharp = pr.plan(pr.parse_size(["1 Roll 23×160 in"]), (2300, 2300), dpi=300, repeats=3)
     assert sharp.to_dict()["soft"] is False
-    mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=300)
-    assert mural.lowered and mural.dpi < 100
+    mural = pr.plan(pr.parse_size(["Mural 120×140 in"]), (5000, 3000), dpi=300)
+    assert mural.mode == "cover" and mural.lowered and mural.dpi < 100
+    repeated = pr.plan(pr.parse_size(["Mural 120×140 in"]), (4000, 4000), dpi=150)
+    assert repeated.mode == "pattern" and repeated.repeats >= 1
+
+
+def test_the_invoice_sheet_holds_the_order_and_survives_odd_characters():
+    import zlib
+
+    from PIL import Image
+
+    from stallkit.drop import invoice
+    receipt = {"receipt_id": 42, "name": "Şule Öztürk (Ünal)", "first_line": "1 Main St",
+               "city": "Izmir", "country_iso": "TR", "is_paid": True,
+               "transactions": [{"title": "Leopard Jungle Wallpaper " * 6, "quantity": 2,
+                                 "price": {"amount": 1600, "divisor": 100, "currency_code": "USD"},
+                                 "variations": [{"formatted_name": "Size", "formatted_value": "SAMPLE 15x20"}]}],
+               "grandtotal": {"amount": 3200, "divisor": 100, "currency_code": "USD"}}
+    pdf = invoice.build(receipt, "ExampleShop", {1: Image.new("RGB", (30, 40), "white")})
+    body = pdf.split(b"/Filter /FlateDecode", 1)[1].split(b"stream\n", 1)[1]
+    page = zlib.decompress(body.split(b"\nendstream", 1)[0])
+    assert "Sule Öztürk".encode("cp1252") in page and b"#42" in page and b"2 x US$16.00" in page
+    assert b"US$32.00" in page and b"/Im1 Do" in page
+    assert invoice.money({"amount": 5, "divisor": 100, "currency_code": "TRY"}) == "TRY 0.05"
+
+
+def test_a_tile_whose_edges_do_not_meet_is_made_seamless():
+    import random
+
+    from PIL import Image
+
+    from stallkit.drop import production as pr
+    random.seed(3)
+    tile = Image.new("RGB", (240, 240))
+    tile.putdata([(int(255 * (i % 240) / 240), 90 + random.randrange(40), 60) for i in range(240 * 240)])
+    before = max(pr.seam_ratios(tile))
+    after = max(pr.seam_ratios(pr.make_seamless(tile)))
+    assert before > pr.SEAM_WARN and after < pr.SEAM_WARN and after < before
+    assert pr.make_seamless(tile).size == tile.size
+
+
+def test_an_order_with_a_broken_tile_is_repaired_and_says_so(web):
+    from PIL import Image
+    rid = _order_with(web, ["1 Roll 23×40 in", "Traditional"])
+    root = web.ctx.workspace().root
+    folder = root / "print-files" / "1000001"
+    folder.mkdir(parents=True)
+    tile = Image.new("RGB", (200, 200))
+    tile.putdata([(int(255 * (i % 200) / 200), 100, 80) for i in range(200 * 200)])
+    tile.save(folder / "tile.png")
+    seam = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50}).json()["items"][0]["seam"]
+    assert seam["fixed"] is True and seam["ok"] is True and seam["before"]["across"] > seam["across"]
+
+
+def test_waiting_orders_are_prepared_in_the_background_once(web):
+    rid = _order_with(web, ["1 Roll 23×40 in", "Traditional"])
+    root = web.ctx.workspace().root
+    _tile(root, 1000001)
+    job = web.client.post("/api/orders/print-waiting", json={"dpi": 50}).json()
+    final = wait_for_job(web, job["id"], timeout=30)
+    assert final["status"] == "done" and final["result"]["prepared"] == 1
+    assert (root / "print-files" / "orders" / str(rid) / f"order-{rid}-invoice.pdf").is_file()
+    again = wait_for_job(web, web.client.post("/api/orders/print-waiting", json={"dpi": 50}).json()["id"],
+                         timeout=30)
+    assert again["result"]["prepared"] == 0  # an order that has its sheet is done
