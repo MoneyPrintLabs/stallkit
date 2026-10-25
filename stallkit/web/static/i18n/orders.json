@@ -145,7 +145,13 @@
     "print.problem.unreadable": "Baskı dosyası okunamadı",
     "errors.nothing_to_print": "Bu siparişte henüz hazırlanabilecek ürün yok.",
     "print.quality": "Baskı kalitesi",
-    "print.soft": "Tasarım {x} kat büyütülüyor: bu çözünürlükte bulanık basılır, daha büyük tasarım isteyin"
+    "print.soft": "Tasarım {x} kat büyütülüyor: bu çözünürlükte bulanık basılır, daha büyük tasarım isteyin",
+    "print.all": "Siparişleri hazırla",
+    "print.all_tip": "Kargo bekleyen tüm siparişlerin baskı dosyalarını hazırlar (Etsy'ye bir şey gönderilmez)",
+    "print.all_none": "Kargo bekleyen sipariş yok",
+    "print.all_progress": "{i}/{n} hazırlanıyor…",
+    "print.all_done": "{n} baskı dosyası hazır",
+    "print.all_skipped": "{n} siparişin ilanında baskı dosyası yok ya da ölçü okunamadı: onları tek tek açın"
   },
   "en": {
     "title": "Orders",
@@ -293,6 +299,12 @@
     "print.problem.unreadable": "The print file cannot be read",
     "errors.nothing_to_print": "No item of this order can be made yet.",
     "print.quality": "Print quality",
-    "print.soft": "The design is enlarged {x}×: it prints soft at this resolution, get a larger design"
+    "print.soft": "The design is enlarged {x}×: it prints soft at this resolution, get a larger design",
+    "print.all": "Prepare orders",
+    "print.all_tip": "Makes the print files of every order waiting to ship (nothing is sent to Etsy)",
+    "print.all_none": "No order is waiting to ship",
+    "print.all_progress": "Preparing {i}/{n}…",
+    "print.all_done": "{n} print files ready",
+    "print.all_skipped": "{n} orders have no print file on their listing or no readable size: open them one by one"
   }
 }

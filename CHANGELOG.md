@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     goes to a lower dpi to fit in memory and says so), keeps the pattern the same size at
     both, and flags a design that must be enlarged more than 1.5× (it would print soft).
     Nothing is sent to Etsy (`GET/POST /api/orders/{id}/print`, `drop/production.py`).
+    Opening it makes the files at once (one click: *Siparişi hazırla*), at the 150 or 300 dpi
+    last chosen, and **Siparişleri hazırla** in the header does the same for every order
+    waiting to ship, naming the ones that still lack a print file.
 
 ## [0.3.3] — 2026-10-04
 
