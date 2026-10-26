@@ -11,7 +11,7 @@
     GET  /api/orders/drafts                  carriers and numbers not sent yet (this computer)
     POST /api/orders/drafts {rows:[{receipt_id, carrier_name, tracking_code, note_to_buyer?}]}
     GET  /api/orders/{id}/print?dpi=&repeats=  what each item's print-ready file would be
-    POST /api/orders/{id}/print {dpi?, repeats?} make them (print-files/orders/<id>/; local)
+    POST /api/orders/{id}/print {dpi?, repeats?, bleed?} make them (print-files/orders/<id>/; local)
     POST /api/orders/{id}/print/open         show that folder
     GET/POST /api/partner                    the seller's production partner (address, token, costs)
     POST /api/orders/{id}/partner {confirm: true, force?}  send the order to that partner
@@ -490,7 +490,7 @@ def _quick(handler: Any) -> Any:
 
 
 def _print_items(root: Any, receipt: dict[str, Any], *, dpi: int,
-                 repeats: int | None) -> list[dict[str, Any]]:
+                 repeats: int | None, bleed: float = 0.0) -> list[dict[str, Any]]:
     """Each physical item of an order and the print-ready file it becomes (drop.production):
     its size from the variation, its listing's print file, how the design fills it and
     how well the design repeats. `problem` says why an item cannot be made."""
@@ -534,7 +534,7 @@ def _print_items(root: Any, receipt: dict[str, Any], *, dpi: int,
                           "mtime": int(design.stat().st_mtime)}
         if size is None:
             continue
-        made = production.plan(size, image.size, dpi=dpi, repeats=repeats)
+        made = production.plan(size, image.size, dpi=dpi, repeats=repeats, bleed_in=bleed)
         if made.mode == "pattern":
             # A pattern whose edges do not meet shows a line where it repeats: its edges
             # are blended (the design file itself is never changed) and re-measured.
@@ -738,7 +738,7 @@ class OrdersApi:
 
     # --- print-ready files (drop.production) ------------------------------------------------
 
-    def _print_args(self, source: Any) -> tuple[int, int | None]:
+    def _print_args(self, source: Any) -> tuple[int, int | None, float]:
         from ...drop import production
 
         try:
@@ -753,7 +753,15 @@ class OrdersApi:
                            f"dpi must be {production.MIN_DPI}-{production.MAX_DPI}", field="dpi")
         if repeats is not None and not 1 <= repeats <= 40:
             raise ApiError(422, "invalid", "repeats must be 1-40", field="repeats")
-        return dpi, repeats
+        try:
+            bleed = float(source.get("bleed") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ApiError(422, "invalid", "bleed must be a number of inches",
+                           field="bleed") from exc
+        if not 0 <= bleed <= production.MAX_BLEED_IN:
+            raise ApiError(422, "invalid",
+                           f"bleed must be 0-{production.MAX_BLEED_IN:g} inches", field="bleed")
+        return dpi, repeats, bleed
 
     def _receipt_for_print(self, receipt_id: int) -> dict[str, Any]:
         client = self.ctx.client()
@@ -791,9 +799,9 @@ class OrdersApi:
 
     def print_plan(self, req: Request) -> dict[str, Any]:
         receipt_id = req.params["id"]
-        dpi, repeats = self._print_args(req.query)
+        dpi, repeats, bleed = self._print_args(req.query)
         receipt = self._receipt_for_print(receipt_id)
-        items = _print_items(self.ctx.workspace_root(), receipt, dpi=dpi, repeats=repeats)
+        items = _print_items(self.ctx.workspace_root(), receipt, dpi=dpi, repeats=repeats, bleed=bleed)
         return self._print_answer(receipt_id, items, dpi, receipt)
 
     def make_print(self, req: Request) -> dict[str, Any]:
@@ -801,10 +809,10 @@ class OrdersApi:
         from ...drop import production
 
         receipt_id = req.params["id"]
-        dpi, repeats = self._print_args(req.json_object())
+        dpi, repeats, bleed = self._print_args(req.json_object())
         receipt = self._receipt_for_print(receipt_id)
         root = self.ctx.workspace_root()
-        items = _print_items(root, receipt, dpi=dpi, repeats=repeats)
+        items = _print_items(root, receipt, dpi=dpi, repeats=repeats, bleed=bleed)
         if not any(i["plan"] for i in items):
             raise ApiError(422, "nothing_to_print", "No item of this order can be made yet.")
         folder = production.order_folder(root, receipt_id)
@@ -838,7 +846,7 @@ class OrdersApi:
         opens, so a new order's files are ready before the seller looks. Local only."""
         from ...drop import production
 
-        dpi, repeats = self._print_args(req.json_object())
+        dpi, repeats, bleed = self._print_args(req.json_object())
         for job in self.ctx.jobs.active(lane="read"):
             if job.kind == "print":
                 return job.summary()
@@ -855,7 +863,7 @@ class OrdersApi:
                 folder = production.order_folder(root, rid)
                 if (folder / f"order-{rid}-invoice.pdf").is_file():
                     continue
-                items = _print_items(root, receipt, dpi=dpi, repeats=repeats)
+                items = _print_items(root, receipt, dpi=dpi, repeats=repeats, bleed=bleed)
                 if not any(i["plan"] for i in items):
                     lacking += 1
                     continue
@@ -940,13 +948,13 @@ class OrdersApi:
         if not partner.configured(settings):
             raise ApiError(409, "no_partner", "Connect your production partner first.")
         receipt_id = req.params["id"]
-        dpi, repeats = self._print_args(body)
+        dpi, repeats, bleed = self._print_args(body)
         receipt = self._receipt_for_print(receipt_id)
         root = self.ctx.workspace_root()
         folder = production.order_folder(root, receipt_id)
         if partner.sent_record(folder) and body.get("force") is not True:
             raise ApiError(409, "already_sent", "This order was already sent to the partner.")
-        items = _print_items(root, receipt, dpi=dpi, repeats=repeats)
+        items = _print_items(root, receipt, dpi=dpi, repeats=repeats, bleed=bleed)
         if not any(i["plan"] for i in items):
             raise ApiError(422, "nothing_to_print", "No item of this order can be made yet.")
         try:

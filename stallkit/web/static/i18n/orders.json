@@ -194,7 +194,11 @@
     "errors.already_sent": "Bu sipariş ortağa zaten gönderilmiş.",
     "errors.partner_unreachable": "Ortağa ulaşılamadı: {message}",
     "errors.partner_refused": "Ortak siparişi kabul etmedi ({status}).",
-    "errors.confirm_required": "Göndermek için onay gerekiyor."
+    "errors.confirm_required": "Göndermek için onay gerekiyor.",
+    "print.bleed": "Taşma payı",
+    "print.bleed_none": "Yok",
+    "print.bleed_tip": "Baskıcı kenardan biraz keserse beyaz çizgi kalmasın diye desen her kenardan bu kadar uzatılır",
+    "print.bleed_in": "her kenarda {n} in taşma"
   },
   "en": {
     "title": "Orders",
@@ -391,6 +395,10 @@
     "errors.already_sent": "This order was already sent to the partner.",
     "errors.partner_unreachable": "The partner could not be reached: {message}",
     "errors.partner_refused": "The partner did not accept the order ({status}).",
-    "errors.confirm_required": "Sending needs a confirmation."
+    "errors.confirm_required": "Sending needs a confirmation.",
+    "print.bleed": "Bleed",
+    "print.bleed_none": "None",
+    "print.bleed_tip": "The pattern runs this far past every edge, so a printer who trims a little leaves no white line",
+    "print.bleed_in": "{n} in bleed on every side"
   }
 }

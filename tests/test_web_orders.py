@@ -900,3 +900,40 @@ def test_a_partner_that_refuses_is_reported_and_not_recorded(web):
     assert resp.status_code == 502 and resp.json()["error"]["code"] == "partner_refused"
     plan = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50}).json()
     assert plan["partner"]["sent"] is None  # it can be sent again
+
+
+def test_a_bleed_extends_the_file_and_the_pattern_runs_on_past_the_trim():
+    from PIL import Image
+
+    from stallkit.drop import production as pr
+    tile = Image.new("RGB", (100, 100))
+    tile.putdata([((i % 100) * 2, (i // 100) * 2, 90) for i in range(100 * 100)])
+    size = pr.parse_size(["1 Roll 23\u00d720 in"])
+    plain = pr.plan(size, tile.size, dpi=50)
+    bled = pr.plan(size, tile.size, dpi=50, bleed_in=0.5)
+    assert (plain.file_width_px, plain.file_height_px) == (1150, 1000)
+    assert (bled.bleed_px, bled.file_width_px, bled.file_height_px) == (25, 1200, 1050)
+    assert (bled.width_px, bled.height_px) == (1150, 1000)  # the trimmed size is unchanged
+    out_plain, out_bled = pr.render(tile, plain), pr.render(tile, bled)
+    assert out_bled.size == (1200, 1050)
+    # The pattern is the same, only shifted by the bleed: the trim box matches the plain file.
+    box = out_bled.crop((25, 25, 25 + 1150, 25 + 1000))
+    assert list(box.crop((0, 0, 40, 40)).getdata()) == list(out_plain.crop((0, 0, 40, 40)).getdata())
+    assert "bleed0.5in" in pr.file_name(1, bled, "Traditional", 1)
+    assert pr.plan(size, tile.size, bleed_in=9).bleed_px == round(pr.MAX_BLEED_IN * 150)
+
+
+def test_the_bleed_goes_through_the_api_and_the_partner(web):
+    from PIL import Image
+    rid = _order_with(web, ["1 Roll 23\u00d720 in", "Traditional"])
+    _tile(web.ctx.workspace().root, 1000001)
+    bad = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50, "bleed": 5})
+    assert bad.status_code == 422
+    made = web.client.post(f"/api/orders/{rid}/print", json={"dpi": 50, "bleed": 0.5}).json()
+    plan = made["items"][0]["plan"]
+    assert (plan["file_width_px"], plan["bleed_in"]) == (1200, 0.5)
+    name = made["items"][0]["file"]
+    assert "bleed0.5in" in name
+    root = web.ctx.workspace().root
+    with Image.open(root / "print-files" / "orders" / str(rid) / name) as image:
+        assert image.size == (1200, 1050)

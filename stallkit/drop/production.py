@@ -32,6 +32,7 @@ from .workspace import IMAGE_SUFFIXES, PRINT_DIR
 
 DEFAULT_DPI = 150
 MIN_DPI, MAX_DPI = 50, 300
+MAX_BLEED_IN = 1.0
 # The width of one roll, in inches; also the repeat a sample is shown at.
 ROLL_WIDTH_IN = 23.0
 # Above this many pixels a file is made at a lower dpi (a 120×140 in mural at 150 dpi is
@@ -204,12 +205,24 @@ class Plan:
     repeats: int = 0  # pattern: how many times the tile spans a roll's width
     span_px: int = 0  # pattern: that width (a roll's), which `repeats` tiles fill exactly
     lowered: bool = False  # a file made at a lower dpi to fit in memory
+    bleed_px: int = 0  # extra design added on every side, for the printer to trim
     upscale: float = 1.0  # how much the design is enlarged to fill the file
     notes: list[str] = field(default_factory=list)
 
+    @property
+    def file_width_px(self) -> int:
+        return self.width_px + 2 * self.bleed_px
+
+    @property
+    def file_height_px(self) -> int:
+        return self.height_px + 2 * self.bleed_px
+
     def to_dict(self) -> dict[str, Any]:
         return {"mode": self.mode, "dpi": self.dpi, "width_px": self.width_px,
-                "height_px": self.height_px, "repeats": self.repeats,
+                "height_px": self.height_px, "bleed_px": self.bleed_px,
+                "bleed_in": round(self.bleed_px / self.dpi, 3),
+                "file_width_px": self.file_width_px, "file_height_px": self.file_height_px,
+                "repeats": self.repeats,
                 "repeat_px": round(self.span_px / self.repeats) if self.repeats else 0,
                 "lowered": self.lowered, "upscale": round(self.upscale, 2),
                 "soft": self.upscale > UPSCALE_WARN,
@@ -226,9 +239,15 @@ def repeats_for(tile_width: int, roll_px: int, wanted: int | None = None) -> int
 
 def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
          repeats: int | None = None, mode: str | None = None,
-         roll_width_in: float = ROLL_WIDTH_IN) -> Plan:
-    """What the file of an item of `size` is, from a design of `tile_size` pixels."""
+         roll_width_in: float = ROLL_WIDTH_IN, bleed_in: float = 0.0) -> Plan:
+    """What the file of an item of `size` is, from a design of `tile_size` pixels.
+
+    `bleed_in`: inches of design added on every side beyond the trimmed size, so a printer
+    that cuts a little off an edge does not leave a white line (the pattern simply
+    continues; a picture is enlarged to cover it).
+    """
     dpi = max(MIN_DPI, min(MAX_DPI, int(dpi)))
+    bleed_in = max(0.0, min(MAX_BLEED_IN, float(bleed_in or 0)))
     if mode is None:
         # A mural of a near-square design is that design repeated (the listing sells the
         # same tile as rolls and as murals); a wide or tall picture covers the wall.
@@ -237,12 +256,15 @@ def plan(size: Size, tile_size: tuple[int, int], *, dpi: int = DEFAULT_DPI,
     notes: list[str] = []
     lowered = False
     limit = MAX_PATTERN_PIXELS if mode == "pattern" else MAX_PIXELS
-    if size.width_in * size.height_in * dpi * dpi > limit:
-        dpi = max(MIN_DPI, int(math.sqrt(limit / (size.width_in * size.height_in))))
+    full_w, full_h = size.width_in + 2 * bleed_in, size.height_in + 2 * bleed_in
+    if full_w * full_h * dpi * dpi > limit:
+        dpi = max(MIN_DPI, int(math.sqrt(limit / (full_w * full_h))))
         lowered = True
-    width_px = min(JPEG_LIMIT, round(size.width_in * dpi))
-    height_px = min(JPEG_LIMIT, round(size.height_in * dpi))
-    result = Plan(size, mode, dpi, width_px, height_px, lowered=lowered, notes=notes)
+    bleed_px = round(bleed_in * dpi)
+    width_px = min(JPEG_LIMIT - 2 * bleed_px, round(size.width_in * dpi))
+    height_px = min(JPEG_LIMIT - 2 * bleed_px, round(size.height_in * dpi))
+    result = Plan(size, mode, dpi, width_px, height_px, lowered=lowered, notes=notes,
+                  bleed_px=bleed_px)
     if mode == "pattern":
         # A roll's repeat spans its own width; anything else is shown at a roll's repeat.
         roll_px = width_px if size.kind == "roll" else round(roll_width_in * dpi)
@@ -262,7 +284,7 @@ def render(design: Image.Image, item: Plan) -> Image.Image:
     keeps edges clean but leaves them soft, and a printer shows that."""
     soft = item.upscale > 1.2
     if item.mode == "cover":
-        fitted = ImageOps.fit(design, (item.width_px, item.height_px), Image.LANCZOS,
+        fitted = ImageOps.fit(design, (item.file_width_px, item.file_height_px), Image.LANCZOS,
                               centering=(0.5, 0.5))
         return fitted.filter(_SHARPEN) if soft else fitted
     # One roll's width of `repeats` tiles, made exactly that wide: the next roll starts
@@ -278,9 +300,13 @@ def render(design: Image.Image, item: Plan) -> Image.Image:
         strip.paste(tile, (i * tile_w, 0))
     if strip.width != span:
         strip = strip.resize((span, tile_h), Image.LANCZOS)
-    canvas = Image.new("RGB", (item.width_px, item.height_px), "white")
-    for y in range(0, item.height_px, tile_h):
-        for x in range(0, item.width_px, span):
+    # The pattern starts at the trimmed edge: the bleed is the same pattern running on past it.
+    bleed = item.bleed_px
+    canvas = Image.new("RGB", (item.file_width_px, item.file_height_px), "white")
+    x0 = bleed - span * math.ceil(bleed / span)
+    y0 = bleed - tile_h * math.ceil(bleed / tile_h)
+    for y in range(y0, item.file_height_px, tile_h):
+        for x in range(x0, item.file_width_px, span):
             canvas.paste(strip, (x, y))
     return canvas
 
@@ -298,6 +324,8 @@ def file_name(index: int, item: Plan, material: str, quantity: int) -> str:
         parts.append(_slug(material))
     if quantity > 1:
         parts.append(f"x{quantity}")
+    if item.bleed_px:
+        parts.append(f"bleed{item.bleed_px / item.dpi:g}in")
     return "-".join(p for p in parts if p) + ".jpg"
 
 

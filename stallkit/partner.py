@@ -166,8 +166,10 @@ def build_payload(receipt: dict[str, Any], items: list[dict[str, Any]], folder: 
             "quantity": item["quantity"],
             "paper": item.get("material") or "",
             "size": item["size"],
-            "file": {"name": item["file"], "width_px": plan["width_px"],
-                     "height_px": plan["height_px"], "dpi": plan["dpi"],
+            "file": {"name": item["file"], "width_px": plan["file_width_px"],
+                     "height_px": plan["file_height_px"], "dpi": plan["dpi"],
+                     "trim_width_px": plan["width_px"], "trim_height_px": plan["height_px"],
+                     "bleed_in": plan["bleed_in"],
                      **_inline(file, inline)},
         })
     invoice = folder / f"order-{receipt.get('receipt_id')}-invoice.pdf"
