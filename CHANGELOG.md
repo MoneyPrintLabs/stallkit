@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows the estimated production cost against the item income and warns when the order
   would lose money. Nothing is sent to Etsy and nothing is sent before the button is
   pressed (`GET/POST /api/partner`, `POST /api/orders/{id}/partner`).
+- **Competitor analysis beyond the tags.** The SEO page's keyword research now also shows
+  what the ranking listings charge (price range and median, in the most common currency),
+  how many favourites the middle one has, the title phrases most of them use, and the five
+  most favourited listings with links (`market` in `GET /api/seo/research`). It reads the
+  same search the tags come from, so it costs no extra Etsy request.
 
 ### Added
 - **Print files.** Found on a real shop: 88 of its 99 listings had only their mockups left,

@@ -161,7 +161,14 @@
     "issue.images.few": "Çok az fotoğraf var",
     "issue.images.some": "Fotoğraf sayısı artırılabilir",
     "issue.images.alt": "Fotoğraflarda alt metin yok",
-    "issue.images.small": "Ana fotoğraf küçük"
+    "issue.images.small": "Ana fotoğraf küçük",
+    "market.price": "Fiyat aralığı",
+    "market.median": "medyan",
+    "market.of": "{n}/{total} ilan, en yaygın para birimi",
+    "market.favorers": "Beğeni",
+    "market.phrases": "Rakiplerin başlıkta ortak kullandığı ifadeler",
+    "market.phrase_count": "{count}/{sampled} ilanın başlığında geçiyor",
+    "market.top": "En çok beğenilen 5 rakip ilan"
   },
   "en": {
     "title": "SEO",
@@ -325,6 +332,13 @@
     "issue.images.few": "Too few photos",
     "issue.images.some": "More photos would sell better",
     "issue.images.alt": "Photos have no alt text",
-    "issue.images.small": "Main photo is small"
+    "issue.images.small": "Main photo is small",
+    "market.price": "Price range",
+    "market.median": "median",
+    "market.of": "{n} of {total} listings, the most common currency",
+    "market.favorers": "Favourites",
+    "market.phrases": "Title phrases the top listings share",
+    "market.phrase_count": "In the title of {count} of {sampled} listings",
+    "market.top": "The 5 most favourited listings"
   }
 }

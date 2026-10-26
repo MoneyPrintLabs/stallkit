@@ -303,6 +303,13 @@ def test_research_lists_tags_the_listing_lacks_with_their_share(web):
     assert data["free_slots"] == 9 and data["used_slots"] == 4
     assert data["add_now"] == ["coffee lover gift", "handmade mug", "pottery mug"]
     assert data["cached"] is False
+    # The competitor view beyond the tags: price band, favourites, shared phrases, top five.
+    market = data["market"]
+    assert market["currency"] == "USD" and market["price"]["sample"] == 300
+    assert market["price"]["min"] == market["price"]["median"] == market["price"]["max"] == 24.0
+    assert market["median_favorers"] == 149.5
+    assert [row["favorers"] for row in market["top"]] == [299, 298, 297, 296, 295]
+    assert market["phrases"] and "stoneware mug" in {p["phrase"] for p in market["phrases"]}
 
     searches = [r for r in fake.requests if r.url.path.endswith("/listings/active")]
     assert len(searches) == 3  # 300 listings, 100 per page

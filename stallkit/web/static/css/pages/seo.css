@@ -957,3 +957,33 @@
     flex: none;
   }
 }
+
+.page-seo .seo-market {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 12px;
+  font-size: 12.5px;
+}
+.page-seo .seo-market-line {
+  margin: 0;
+}
+.page-seo .seo-market-block {
+  display: grid;
+  gap: 6px;
+}
+.page-seo .seo-market-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.page-seo .seo-market-top {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+.page-seo .seo-market-top li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
