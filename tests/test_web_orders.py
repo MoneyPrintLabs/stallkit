@@ -833,3 +833,70 @@ def test_waiting_orders_are_prepared_in_the_background_once(web):
     again = wait_for_job(web, web.client.post("/api/orders/print-waiting", json={"dpi": 50}).json()["id"],
                          timeout=30)
     assert again["result"]["prepared"] == 0  # an order that has its sheet is done
+
+
+# --- the production partner ------------------------------------------------------------------
+
+
+def _partner_order(web):
+    rid = _order_with(web, ["1 Roll 23×40 in", "Traditional"])
+    _tile(web.ctx.workspace().root, 1000001)
+    return rid
+
+
+def test_the_partner_settings_hide_the_token_and_refuse_a_plain_http_address(web):
+    assert web.client.get("/api/partner").json()["configured"] is False
+    bad = web.client.post("/api/partner", json={"url": "http://partner.example.com/orders"})
+    assert bad.status_code == 422
+    saved = web.client.post("/api/partner", json={
+        "name": "Print Co", "url": "https://partner.example.com/orders", "token": "SECRET123",
+        "cost_sqm": 12.5, "fixed": 3}).json()
+    assert saved["configured"] and saved["token_set"] and "SECRET123" not in str(saved)
+    kept = web.client.post("/api/partner", json={"name": "Print Co 2"}).json()
+    assert kept["name"] == "Print Co 2" and kept["token_set"] is True  # the token stays
+    assert web.client.post("/api/partner", json={"clear": True}).json()["configured"] is False
+
+
+def test_an_order_is_sent_to_the_partner_once_and_only_when_asked(web):
+    import httpx
+
+    rid = _partner_order(web)
+    seen = []
+
+    def partner(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        seen.append((request.headers.get("authorization"), _json.loads(request.content)))
+        return httpx.Response(200, json={"ok": True})
+
+    web.ctx.partner_transport = httpx.MockTransport(partner)
+    no = web.client.post(f"/api/orders/{rid}/partner", json={"confirm": True})
+    assert no.status_code == 409 and no.json()["error"]["code"] == "no_partner"
+    web.client.post("/api/partner", json={"name": "Print Co", "url": "https://partner.example.com/o",
+                                          "token": "T0K", "cost_sqm": 10, "fixed": 2})
+    unasked = web.client.post(f"/api/orders/{rid}/partner", json={})
+    assert unasked.status_code == 422 and seen == []
+    done = web.client.post(f"/api/orders/{rid}/partner", json={"confirm": True, "dpi": 50}).json()
+    assert done["sent"]["ok"] is True and done["partner"]["sent"]["status"] == 200
+    [(auth, payload)] = seen
+    assert auth == "Bearer T0K" and payload["order_id"] == rid
+    assert payload["recipient"]["country"] == "US" and payload["recipient"]["name"]
+    [item] = payload["items"]
+    assert item["size"]["kind"] == "roll" and item["file"]["width_px"] == 1150
+    assert "base64" not in item["file"]  # files stay on this computer unless turned on
+    # 23x40 in = 0.5937 sq m, x 10 + 2 fixed
+    assert done["partner"]["cost"]["total"] == 7.94
+    again = web.client.post(f"/api/orders/{rid}/partner", json={"confirm": True})
+    assert again.status_code == 409 and again.json()["error"]["code"] == "already_sent"
+    assert len(seen) == 1
+
+
+def test_a_partner_that_refuses_is_reported_and_not_recorded(web):
+    import httpx
+
+    rid = _partner_order(web)
+    web.ctx.partner_transport = httpx.MockTransport(lambda r: httpx.Response(401, text="bad token"))
+    web.client.post("/api/partner", json={"url": "https://partner.example.com/o", "send_files": True})
+    resp = web.client.post(f"/api/orders/{rid}/partner", json={"confirm": True, "dpi": 50})
+    assert resp.status_code == 502 and resp.json()["error"]["code"] == "partner_refused"
+    plan = web.client.get(f"/api/orders/{rid}/print", params={"dpi": 50}).json()
+    assert plan["partner"]["sent"] is None  # it can be sent again

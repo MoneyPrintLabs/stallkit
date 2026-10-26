@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Your own production partner.** In an order's *Baskı dosyası* window, **Üretim ortağı
+  bağla** takes a name, the address your partner takes orders at (its API, a Zapier or Make
+  webhook, or your own server; https, or http to this computer), an optional token, whether
+  to send the files too (up to 25 MB each, larger ones go by name) and your costs (price per
+  square metre, fixed price per order). Saved on this computer only (`partner.json`); no
+  partner is built in. **Siparişi gönder** then posts the order as JSON (buyer's address, each
+  item's size, paper and file, the invoice sheet) after a confirmation, once per order
+  (*Tekrar gönder* sends it again), and records the answer beside the files. The window
+  shows the estimated production cost against the item income and warns when the order
+  would lose money. Nothing is sent to Etsy and nothing is sent before the button is
+  pressed (`GET/POST /api/partner`, `POST /api/orders/{id}/partner`).
+
+### Added
 - **Print files.** Found on a real shop: 88 of its 99 listings had only their mockups left,
   so an order of one of them could not be printed. Every listing now has a folder
   for the design an order is printed from, `print-files/<listing id>/` in the products

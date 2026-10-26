@@ -826,3 +826,23 @@
   color: var(--danger, #ef6a6a);
   font-weight: 600;
 }
+
+.o-print-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.o-pt-form {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+}
+.o-pt-field {
+  display: grid;
+  gap: 4px;
+}
+.o-pt-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
