@@ -325,7 +325,7 @@ export default {
       for (const [i, id] of ids.entries()) {
         prepareAllBtn.querySelector(".btn-label")?.replaceChildren(t("print.all_progress", { i: i + 1, n: ids.length }));
         try {
-          const d = await ctx.api.post(`/api/orders/${id}/print`, { dpi: savedDpi() });
+          const d = await ctx.api.post(`/api/orders/${id}/print`, { dpi: savedDpi(), bleed: savedBleed() });
           made += d.items.filter((it) => it.made).length;
         } catch (err) {
           if (err.code === "nothing_to_print") skipped += 1;
@@ -608,6 +608,22 @@ export default {
         return 150;
       }
     }
+    const PRINT_BLEED_KEY = "stallkit.orders.print_bleed";
+    function savedBleed() {
+      try {
+        const v = Number(localStorage.getItem(PRINT_BLEED_KEY));
+        return [0.25, 0.5].includes(v) ? v : 0;
+      } catch {
+        return 0;
+      }
+    }
+    function saveBleed(v) {
+      try {
+        localStorage.setItem(PRINT_BLEED_KEY, String(v));
+      } catch {
+        /* the choice is only remembered */
+      }
+    }
     function saveDpi(v) {
       try {
         localStorage.setItem(PRINT_DPI_KEY, String(v));
@@ -627,6 +643,16 @@ export default {
       });
       modal({ title: t("print.title", { id: row.receipt_id }), subtitle: t("print.sub"), body, width: 560, actions: [folderBtn, makeBtn] });
       let dpi = savedDpi();
+      let bleed = savedBleed();
+      const bleedSel = select({
+        value: String(bleed),
+        options: [{ value: "0", label: t("print.bleed_none") }, { value: "0.25", label: "0.25 in" }, { value: "0.5", label: "0.5 in" }],
+        onChange: (v) => {
+          bleed = Number(v);
+          saveBleed(bleed);
+          load();
+        },
+      });
       const dpiSel = select({
         value: String(dpi),
         options: [{ value: "150", label: "150 dpi" }, { value: "300", label: "300 dpi" }],
@@ -640,7 +666,8 @@ export default {
         const lines = d.items.map((it) => {
           const bits = [];
           if (it.plan) {
-            bits.push(t("print.px", { w: it.plan.width_px, h: it.plan.height_px, dpi: it.plan.dpi }));
+            bits.push(t("print.px", { w: it.plan.file_width_px, h: it.plan.file_height_px, dpi: it.plan.dpi }));
+            if (it.plan.bleed_px) bits.push(t("print.bleed_in", { n: it.plan.bleed_in }));
             bits.push(it.plan.mode === "pattern" ? t("print.repeats", { n: it.plan.repeats }) : t("print.cover"));
             if (it.plan.lowered) bits.push(t("print.lowered", { dpi: it.plan.dpi }));
           }
@@ -669,6 +696,7 @@ export default {
         mount(
           body,
           h("div", { class: "o-print-dpi" }, h("span", { class: "muted" }, t("print.quality")), dpiSel),
+          h("div", { class: "o-print-dpi", title: t("print.bleed_tip") }, h("span", { class: "muted" }, t("print.bleed")), bleedSel),
           lines.length ? lines : h("p", { class: "muted" }, t("print.none")),
           sheet ? h("div", { class: "o-print-item" }, h("strong", null, t("print.invoice")), h("span", { class: "o-print-done" }, icon("check", { size: 12 }), sheet.name)) : null,
           partnerBlock(d),
@@ -719,7 +747,7 @@ export default {
               onClick: async ({ close }) => {
                 close();
                 try {
-                  const res = await ctx.api.post(`/api/orders/${row.receipt_id}/partner`, { confirm: true, force: again || undefined, dpi });
+                  const res = await ctx.api.post(`/api/orders/${row.receipt_id}/partner`, { confirm: true, force: again || undefined, dpi, bleed });
                   show(res);
                   ctx.toast({ tone: "success", title: t("partner.done", { name }) });
                 } catch (err) {
@@ -734,7 +762,7 @@ export default {
       async function make() {
         makeBtn.disabled = true;
         try {
-          const d = await ctx.api.post(`/api/orders/${row.receipt_id}/print`, { dpi });
+          const d = await ctx.api.post(`/api/orders/${row.receipt_id}/print`, { dpi, bleed });
           show(d);
           ctx.toast({ tone: "success", title: t("print.done", { n: d.items.filter((i) => i.made).length }) });
         } catch (err) {
@@ -744,7 +772,7 @@ export default {
       }
       async function load() {
         try {
-          const plan = await ctx.api.get(`/api/orders/${row.receipt_id}/print`, { dpi }, { signal: ctx.signal });
+          const plan = await ctx.api.get(`/api/orders/${row.receipt_id}/print`, { dpi, bleed }, { signal: ctx.signal });
           show(plan);
           // "Siparişi hazırla" is one click: whatever can be made is made now.
           if (plan.ready && plan.items.some((i) => i.plan && !i.made)) await make();
@@ -1309,7 +1337,7 @@ export default {
         // New orders get their print files before the seller looks (a background job).
         if (S.waiting && !S.autoPrint) {
           S.autoPrint = true;
-          ctx.api.post("/api/orders/print-waiting", { dpi: savedDpi() }).catch(() => {});
+          ctx.api.post("/api/orders/print-waiting", { dpi: savedDpi(), bleed: savedBleed() }).catch(() => {});
         }
         for (const row of data.rows) remember(row);
         // The carriers and numbers saved last time, before the first rows show (asked

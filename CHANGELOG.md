@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bleed for print files.** The *Baskı dosyası* window has a *Taşma payı* (none, 0.25 in or
+  0.5 in, remembered): the file runs that far past every edge, so a printer who trims a little
+  leaves no white line. A pattern simply continues (the trimmed size lines up exactly with the
+  file made without a bleed), a picture is enlarged to cover it. The file's name carries
+  `bleed0.5in`, its pixel size includes the bleed, and the partner is sent both the file and
+  the trimmed size (`bleed` in `GET/POST /api/orders/{id}/print`).
+
+### Added
 - **Your own production partner.** In an order's *Baskı dosyası* window, **Üretim ortağı
   bağla** takes a name, the address your partner takes orders at (its API, a Zapier or Make
   webhook, or your own server; https, or http to this computer), an optional token, whether
