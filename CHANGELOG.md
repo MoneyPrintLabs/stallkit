@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Competitor analysis beyond the tags.** The SEO page's keyword research now also shows
+  what the ranking listings charge (price range and median, in the most common currency),
+  how many favourites the middle one has, the title phrases most of them use, and the five
+  most favourited listings with links (`market` in `GET /api/seo/research`). It reads the
+  same search the tags come from, so it costs no extra Etsy request.
+
+### Added
 - **Print files.** Found on a real shop: 88 of its 99 listings had only their mockups left,
   so an order of one of them could not be printed. Every listing now has a folder
   for the design an order is printed from, `print-files/<listing id>/` in the products

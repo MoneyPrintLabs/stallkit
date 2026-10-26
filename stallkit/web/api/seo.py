@@ -611,6 +611,23 @@ def research(req: Request) -> dict[str, Any]:
         "free_slots": suggestions.free_slots,
         "used_slots": suggestions.used_slots,
         "cached": cached,
+        "market": _market_view(report),
+    }
+
+
+def _market_view(report: seo.MarketReport) -> dict[str, Any]:
+    """What the ranking listings say beyond their tags: the price band, how many favourites
+    the middle one has, the title phrases most of them use and the five most favourited."""
+    return {
+        "currency": report.currency,
+        "price": {"min": report.price_min, "median": report.price_median,
+                  "max": report.price_max, "sample": report.price_sample},
+        "median_favorers": report.median_favorers,
+        "phrases": [{"phrase": str(p), "count": int(n)} for p, n in report.phrases[:12]],
+        "top": [{"id": row.get("listing_id"), "title": str(row.get("title") or ""),
+                 "price": row.get("price") or "", "currency": row.get("currency") or "",
+                 "favorers": row.get("num_favorers") or 0, "url": str(row.get("url") or "")}
+                for row in report.top_listings[:5]],
     }
 
 
