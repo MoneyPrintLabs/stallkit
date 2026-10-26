@@ -536,6 +536,69 @@ export default {
 
     // Baskı dosyası: each item's print-ready file, made from its listing's print file
     // (drop/production.py). Local only: nothing is sent to Etsy.
+    // Üretim ortağı bağla: the seller's own partner (a name, the address it takes orders at,
+    // an optional token and the seller's costs). Saved on this computer only.
+    async function openPartnerSetup(done) {
+      let current = {};
+      try {
+        current = await ctx.api.get("/api/partner");
+      } catch {
+        /* a blank form */
+      }
+      const field = (label, input, hint) => h("label", { class: "o-pt-field" }, h("span", null, label), input, hint ? h("small", { class: "muted" }, hint) : null);
+      const name = h("input", { type: "text", class: "input", value: current.name || "", placeholder: t("partner.f_name_ph") });
+      const url = h("input", { type: "url", class: "input", value: current.url || "", placeholder: "https://" });
+      const token = h("input", { type: "password", class: "input", placeholder: current.token_set ? t("partner.f_token_kept") : "", autocomplete: "off" });
+      const costSqm = h("input", { type: "number", min: "0", step: "0.01", class: "input", value: current.cost_sqm ?? "" });
+      const fixed = h("input", { type: "number", min: "0", step: "0.01", class: "input", value: current.fixed ?? "" });
+      const files = h("input", { type: "checkbox", checked: !!current.send_files });
+      const err = h("p", { class: "o-print-warn", hidden: true });
+      const body = h(
+        "div",
+        { class: "o-pt-form" },
+        h("p", { class: "muted" }, t("partner.intro")),
+        field(t("partner.f_name"), name),
+        field(t("partner.f_url"), url, t("partner.f_url_hint")),
+        field(t("partner.f_token"), token),
+        h("label", { class: "o-pt-check" }, files, h("span", null, t("partner.f_files"))),
+        field(t("partner.f_cost"), costSqm, t("partner.f_cost_hint")),
+        field(t("partner.f_fixed"), fixed),
+        err,
+      );
+      const buttons = [
+        { label: t("common.cancel"), variant: "ghost" },
+      ];
+      if (current.configured) {
+        buttons.push({
+          label: t("partner.remove"),
+          variant: "ghost",
+          onClick: async ({ close }) => {
+            await ctx.api.post("/api/partner", { clear: true }).catch(() => {});
+            close();
+            if (done) done();
+          },
+        });
+      }
+      buttons.push({
+        label: t("partner.save"),
+        variant: "primary",
+        onClick: async ({ close }) => {
+          err.hidden = true;
+          const payload = { name: name.value, url: url.value, send_files: files.checked, cost_sqm: costSqm.value, fixed: fixed.value };
+          if (token.value) payload.token = token.value;
+          try {
+            await ctx.api.post("/api/partner", payload);
+            close();
+            if (done) done();
+          } catch (e) {
+            err.hidden = false;
+            err.textContent = ctx.api.errorText(e, t);
+          }
+        },
+      });
+      modal({ title: t("partner.setup_title"), body, width: 520, actions: buttons });
+    }
+
     const PRINT_DPI_KEY = "stallkit.orders.print_dpi";
     function savedDpi() {
       try {
@@ -608,8 +671,65 @@ export default {
           h("div", { class: "o-print-dpi" }, h("span", { class: "muted" }, t("print.quality")), dpiSel),
           lines.length ? lines : h("p", { class: "muted" }, t("print.none")),
           sheet ? h("div", { class: "o-print-item" }, h("strong", null, t("print.invoice")), h("span", { class: "o-print-done" }, icon("check", { size: 12 }), sheet.name)) : null,
+          partnerBlock(d),
         );
         makeBtn.disabled = !d.ready;
+      }
+
+      // The seller's own production partner: nothing is sent until the button is pressed.
+      function partnerBlock(d) {
+        const pt = d.partner || {};
+        if (!pt.configured) {
+          return h("div", { class: "o-print-item" }, h("strong", null, t("partner.title")), h("span", { class: "muted" }, t("partner.none")), button({ label: t("partner.connect"), icon: "link", variant: "secondary", size: "sm", onClick: () => openPartnerSetup(() => load()) }));
+        }
+        const cost = pt.cost;
+        const loss = cost && pt.income !== null && pt.income !== undefined && cost.total >= pt.income;
+        const money2 = (v) => `${pt.currency || ""} ${Number(v).toFixed(2)}`.trim();
+        const sent = pt.sent && pt.sent.ok ? pt.sent : null;
+        const send = button({
+          label: sent ? t("partner.resend") : t("partner.send", { name: pt.name || t("partner.title") }),
+          icon: "send",
+          variant: sent ? "ghost" : "primary",
+          size: "sm",
+          disabled: !d.ready,
+          onClick: () => confirmSend(d, !!sent),
+        });
+        return h(
+          "div",
+          { class: cx("o-print-item", loss && "is-warn") },
+          h("strong", null, pt.name || t("partner.title")),
+          cost ? h("span", { class: "muted" }, t("partner.cost", { cost: money2(cost.total), sqm: cost.sqm }), pt.income !== null && pt.income !== undefined ? ` · ${t("partner.income", { income: money2(pt.income) })}` : "") : null,
+          loss ? h("span", { class: "o-print-warn" }, icon("alert", { size: 12 }), t("partner.loss")) : null,
+          sent ? h("span", { class: "o-print-done" }, icon("check", { size: 12 }), t("partner.sent", { time: dateTime(sent.at) })) : null,
+          h("div", { class: "o-print-actions" }, send, button({ label: t("partner.settings"), variant: "ghost", size: "sm", onClick: () => openPartnerSetup(() => load()) })),
+        );
+      }
+
+      function confirmSend(d, again) {
+        const name = (d.partner && d.partner.name) || t("partner.title");
+        const dlg = modal({
+          title: t("partner.confirm_title", { name }),
+          body: h("p", null, t("partner.confirm_body", { name, id: row.receipt_id })),
+          actions: [
+            { label: t("common.cancel"), variant: "ghost" },
+            {
+              label: t("partner.send_now"),
+              variant: "primary",
+              icon: "send",
+              onClick: async ({ close }) => {
+                close();
+                try {
+                  const res = await ctx.api.post(`/api/orders/${row.receipt_id}/partner`, { confirm: true, force: again || undefined, dpi });
+                  show(res);
+                  ctx.toast({ tone: "success", title: t("partner.done", { name }) });
+                } catch (err) {
+                  ctx.toast({ tone: "danger", title: ctx.api.errorText(err, t) });
+                }
+              },
+            },
+          ],
+        });
+        return dlg;
       }
       async function make() {
         makeBtn.disabled = true;

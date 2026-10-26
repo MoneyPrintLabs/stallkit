@@ -13,6 +13,8 @@
     GET  /api/orders/{id}/print?dpi=&repeats=  what each item's print-ready file would be
     POST /api/orders/{id}/print {dpi?, repeats?} make them (print-files/orders/<id>/; local)
     POST /api/orders/{id}/print/open         show that folder
+    GET/POST /api/partner                    the seller's production partner (address, token, costs)
+    POST /api/orders/{id}/partner {confirm: true, force?}  send the order to that partner
     POST /api/orders/print-waiting {dpi?}    job "print": make them for every waiting order
                                              that has none yet (the page asks when it opens)
 
@@ -130,6 +132,9 @@ def register(r: Router, ctx: AppContext) -> None:
     r.post("/api/orders/{id:int}/print", api.make_print)
     r.post("/api/orders/{id:int}/print/open", api.open_print)
     r.post("/api/orders/print-waiting", api.print_waiting)
+    r.get("/api/partner", api.get_partner)
+    r.post("/api/partner", api.set_partner)
+    r.post("/api/orders/{id:int}/partner", api.send_to_partner)
 
 
 # --- pure helpers (tested directly) -----------------------------------------------------
@@ -758,13 +763,24 @@ class OrdersApi:
             raise ApiError(404, "not_found", f"Your shop has no order {receipt_id}.")
         return found[0]
 
-    def _print_answer(self, receipt_id: int, items: list[dict[str, Any]],
-                      dpi: int) -> dict[str, Any]:
+    def _print_answer(self, receipt_id: int, items: list[dict[str, Any]], dpi: int,
+                      receipt: dict[str, Any] | None = None) -> dict[str, Any]:
+        from ... import partner
         from ...drop import printfiles, production
 
         root = self.ctx.workspace_root()
         folder = production.order_folder(root, receipt_id)
+        settings = partner.load()
+        income = _money(receipt.get("subtotal")) if receipt else None
+        cost = partner.estimate_cost(items, settings)
         return {
+            "partner": {
+                **partner.public(settings),
+                "sent": partner.sent_record(folder),
+                "cost": cost,
+                "income": income["amount"] / income["divisor"] if income else None,
+                "currency": income["currency_code"] if income else None,
+            },
             "receipt_id": receipt_id,
             "dpi": dpi,
             "folder": folder.relative_to(root).as_posix(),
@@ -778,7 +794,7 @@ class OrdersApi:
         dpi, repeats = self._print_args(req.query)
         receipt = self._receipt_for_print(receipt_id)
         items = _print_items(self.ctx.workspace_root(), receipt, dpi=dpi, repeats=repeats)
-        return self._print_answer(receipt_id, items, dpi)
+        return self._print_answer(receipt_id, items, dpi, receipt)
 
     def make_print(self, req: Request) -> dict[str, Any]:
         """Make every item's file that can be made. Local only: nothing goes to Etsy."""
@@ -796,7 +812,7 @@ class OrdersApi:
             self._make_files(receipt, items, folder)
         except (OSError, ValueError, MemoryError) as exc:
             raise ApiError(500, "internal", f"Could not make the files: {exc}") from exc
-        return self._print_answer(receipt_id, items, dpi)
+        return self._print_answer(receipt_id, items, dpi, receipt)
 
     def _make_files(self, receipt: dict[str, Any], items: list[dict[str, Any]],
                     folder: Any) -> int:
@@ -883,6 +899,71 @@ class OrdersApi:
         except (OSError, ValueError, MemoryError):
             log.warning("could not write the invoice of order %s", receipt.get("receipt_id"),
                         exc_info=True)
+
+    # --- the production partner (partner.py) ---------------------------------------------
+
+    def get_partner(self, req: Request) -> dict[str, Any]:
+        from ... import partner
+
+        return partner.public()
+
+    def set_partner(self, req: Request) -> dict[str, Any]:
+        """Save the seller's partner: name, address, token, costs. {"clear": true} removes it."""
+        from ... import partner
+        from ...errors import ValidationError
+
+        body = req.json_object()
+        if body.get("clear"):
+            partner.clear()
+            return partner.public()
+        try:
+            partner.save({k: v for k, v in body.items()
+                          if k in ("name", "url", "token", "send_files", "cost_sqm", "fixed")})
+        except ValidationError as exc:
+            raise ApiError(422, "invalid", str(exc), field="url") from exc
+        return partner.public()
+
+    def send_to_partner(self, req: Request) -> dict[str, Any]:
+        """Send the order to the seller's partner, once, after the seller said so.
+
+        The files are made first when they are not yet. An order already sent is not sent
+        again unless {"force": true}.
+        """
+        from ... import partner
+        from ...drop import production
+        from ...errors import ValidationError
+
+        body = req.json_object()
+        if body.get("confirm") is not True:
+            raise ApiError(422, "confirm_required", "Sending an order needs confirm: true.")
+        settings = partner.load()
+        if not partner.configured(settings):
+            raise ApiError(409, "no_partner", "Connect your production partner first.")
+        receipt_id = req.params["id"]
+        dpi, repeats = self._print_args(body)
+        receipt = self._receipt_for_print(receipt_id)
+        root = self.ctx.workspace_root()
+        folder = production.order_folder(root, receipt_id)
+        if partner.sent_record(folder) and body.get("force") is not True:
+            raise ApiError(409, "already_sent", "This order was already sent to the partner.")
+        items = _print_items(root, receipt, dpi=dpi, repeats=repeats)
+        if not any(i["plan"] for i in items):
+            raise ApiError(422, "nothing_to_print", "No item of this order can be made yet.")
+        try:
+            if not all(i["made"] for i in items if i["plan"]):
+                self._make_files(receipt, items, folder)
+            payload = partner.build_payload(receipt, _public(items), folder, settings)
+            record = partner.send(payload, settings, folder,
+                                  transport=getattr(self.ctx, "partner_transport", None))
+        except ValidationError as exc:
+            raise ApiError(502, "partner_unreachable", str(exc)) from exc
+        except (OSError, ValueError, MemoryError) as exc:
+            raise ApiError(500, "internal", f"Could not send the order: {exc}") from exc
+        if not record["ok"]:
+            raise ApiError(502, "partner_refused",
+                           f"The partner answered {record['status']}: {record['answer']}",
+                           status=record["status"])
+        return {"sent": record, **self._print_answer(receipt_id, items, dpi, receipt)}
 
     def open_print(self, req: Request) -> dict[str, Any]:
         from ...drop import production
