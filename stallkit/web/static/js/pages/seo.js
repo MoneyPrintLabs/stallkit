@@ -25,7 +25,7 @@ import {
   field,
 } from "../ui.js";
 import { icon } from "../icons.js";
-import { percent, list as listText, lower } from "../format.js";
+import { money, percent, list as listText, lower } from "../format.js";
 
 const PAGE = 40; // cards rendered at once; "N ilan daha göster" adds the next page
 const RING = 72;
@@ -283,6 +283,7 @@ export default {
     const explainEl = h("div", { class: "seo-explain" });
     const hintEl = h("div", { class: "seo-hint" });
     const tagsEl = h("div", { class: "seo-tags", role: "list", "aria-label": t("research.title") });
+    const marketEl = h("div", { class: "seo-market" });
     const pendingEl = h("div", { class: "seo-pending" });
     const researchCard = h(
       "section",
@@ -295,6 +296,7 @@ export default {
       ),
       kwInput,
       explainEl,
+      marketEl,
       hintEl,
       tagsEl,
       h("footer", { class: "seo-foot" }, pendingEl, infoNote({ icon: "info", tone: "neutral", text: t("research.note") })),
@@ -944,8 +946,31 @@ export default {
 
     const revealedResearch = new WeakSet(); // research answers whose rows already arrived
 
+    // Rakip analizi beyond the tags: what the ranking listings charge, how liked they are,
+    // the title phrases they share and the five most favourited (research.market).
+    function renderMarket(data) {
+      const m = data && data.market;
+      if (!m || !data.sampled) {
+        mount(marketEl);
+        return;
+      }
+      const cur = m.currency || "USD";
+      const price = m.price && m.price.median !== null && m.price.median !== undefined
+        ? h("p", { class: "seo-market-line" }, h("strong", null, t("market.price")), ` ${money(m.price.min, cur)} – ${money(m.price.max, cur)} · ${t("market.median")} ${money(m.price.median, cur)}`, m.price.sample && m.price.sample < data.sampled ? h("span", { class: "muted" }, ` (${t("market.of", { n: m.price.sample, total: data.sampled })})`) : null)
+        : null;
+      const fav = m.median_favorers !== null && m.median_favorers !== undefined ? h("p", { class: "seo-market-line" }, h("strong", null, t("market.favorers")), ` ${t("market.median")} ${Math.round(m.median_favorers)}`) : null;
+      const phrases = (m.phrases || []).length
+        ? h("div", { class: "seo-market-block" }, h("strong", null, t("market.phrases")), h("div", { class: "seo-market-chips" }, m.phrases.map((p) => h("span", { class: "badge tone-neutral", title: t("market.phrase_count", { count: p.count, sampled: data.sampled }) }, `${p.phrase} · ${p.count}`))))
+        : null;
+      const top = (m.top || []).length
+        ? h("div", { class: "seo-market-block" }, h("strong", null, t("market.top")), h("ol", { class: "seo-market-top" }, m.top.map((row) => h("li", null, row.url ? h("a", { href: row.url, target: "_blank", rel: "noopener noreferrer", "data-external": "", class: "ellipsis", title: row.title }, row.title) : h("span", { class: "ellipsis" }, row.title), h("span", { class: "muted num" }, `${row.price ? money(Number(row.price), row.currency || cur) : "–"} · ♥ ${row.favorers}`)))))
+        : null;
+      mount(marketEl, price, fav, phrases, top);
+    }
+
     function renderResearch() {
       const data = state.research;
+      renderMarket(data);
       const item = itemById(state.selected);
       const sampled = data ? data.sampled : SAMPLE;
       researchSub.textContent = t("research.sub", { n: data && data.sampled ? data.sampled : SAMPLE });
