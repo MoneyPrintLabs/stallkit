@@ -91,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     alt text a note (`images.alt`), and a main photo under 2000 px on its short side a note
     (`images.small`). Nothing is said about a listing read without its images.
 
+### Fixed
+- The bell and the Panel showed the raw text `orders:print_ready` / `orders:print_missing`
+  after the order print-file job ran: the two notifications now use their string keys, and a
+  test checks that every notification key in the code has Turkish and English texts.
+
 ## [0.3.3] — 2026-10-04
 
 ### Changed
