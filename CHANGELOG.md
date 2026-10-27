@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-27
+
 ### Added
 - **Bleed for print files.** The *Baskı dosyası* window has a *Taşma payı* (none, 0.25 in or
   0.5 in, remembered): the file runs that far past every edge, so a printer who trims a little
@@ -15,7 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bleed0.5in`, its pixel size includes the bleed, and the partner is sent both the file and
   the trimmed size (`bleed` in `GET/POST /api/orders/{id}/print`).
 
-### Added
 - **Your own production partner.** In an order's *Baskı dosyası* window, **Üretim ortağı
   bağla** takes a name, the address your partner takes orders at (its API, a Zapier or Make
   webhook, or your own server; https, or http to this computer), an optional token, whether
@@ -33,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most favourited listings with links (`market` in `GET /api/seo/research`). It reads the
   same search the tags come from, so it costs no extra Etsy request.
 
-### Added
 - **Print files.** Found on a real shop: 88 of its 99 listings had only their mockups left,
   so an order of one of them could not be printed. Every listing now has a folder
   for the design an order is printed from, `print-files/<listing id>/` in the products
@@ -653,7 +653,8 @@ Recorded here and in the code so nobody has to re-derive them:
 - There is no idempotency key, so non-idempotent writes are never retried on a timeout
   or a 5xx — a repeat would mean a duplicate listing, or a second email to a buyer.
 
-[Unreleased]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/MoneyPrintLabs/stallkit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/MoneyPrintLabs/stallkit/releases/tag/v0.3.1
