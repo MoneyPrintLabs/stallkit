@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it** (a dark pattern is warmed and lifted a little, a light one kept crisp; only on the
   wall), and **one repeat is framed** with a dashed line and a small "Seamless repeat" label,
   the way the best covers show it. It is offered for mockups of type "Ürün" (other); put the
-  four corners round the wall of a plain room photo and set the slider. Under the preview a
+  four corners round the wall of a plain room photo and set the slider. **Daylight** comes
+  with it, automatically: soft warm window light on the wall from the side of the room that is
+  brighter in the photo, fading to the far side, so the pattern does not look pasted flat. Under the preview a
   **cover check** says whether the picture works as a cover: how much of it the wall takes
   (under 45% it asks for a bigger wall) and whether the pattern still shows at the size Etsy
   shows a search result (`tile` in `positions.json`; `drop/wall.py`;

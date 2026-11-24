@@ -46,6 +46,23 @@ def test_dark_patterns_are_warmed_light_ones_sharpened_and_only_on_the_wall():
     assert wall.luminance(pattern(dark=True)) < wall.DARK < wall.LIGHT < wall.luminance(pattern())
 
 
+def test_daylight_comes_from_the_brighter_side_and_only_touches_the_wall():
+    corners = surface.rect_corners(0, 0, 200, 120)
+    room = Image.new("RGB", (200, 200), (200, 200, 200))
+    ImageDraw.Draw(room).rectangle((100, 0, 200, 120), fill=(120, 120, 120))  # the right is darker
+    wall_pic = Image.new("RGB", (200, 200), (150, 150, 150))
+    before = wall_pic.copy()
+    assert wall.daylight(wall_pic, corners, room) == 1  # the light is on the left
+    assert wall_pic.getpixel((10, 60))[0] > wall_pic.getpixel((190, 60))[0]  # the left is brighter
+    assert wall_pic.getpixel((10, 60))[0] > 150 > wall_pic.getpixel((190, 60))[0] - 1
+    assert wall_pic.getpixel((10, 60))[0] > wall_pic.getpixel((10, 60))[2]  # warm
+    assert wall_pic.crop((0, 150, 200, 200)).tobytes() == before.crop((0, 150, 200, 200)).tobytes()
+    flipped = ImageOps.mirror(room)
+    other = before.copy()
+    assert wall.daylight(other, corners, flipped) == -1
+    assert other.getpixel((190, 60))[0] > other.getpixel((10, 60))[0]
+
+
 def test_the_mark_draws_a_frame_and_a_label_on_the_wall():
     canvas = Image.new("RGB", (800, 600), (230, 225, 215))
     before = canvas.copy()

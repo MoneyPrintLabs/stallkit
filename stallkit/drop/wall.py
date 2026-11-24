@@ -10,6 +10,8 @@ and a hint of where it repeats. This is what `mockup.compose` calls for an area 
   wall's width, in the wall's own proportions, so it fills the area like any other design
   (and the area's realism, perspective and folds apply to it as usual);
 - `light` warms and lifts a dark pattern a little and keeps a light one crisp, only on the wall;
+- `daylight` lays soft, warm window light across the wall from the side of the room that is
+  brighter in the photo, fading to the far side, so the pattern does not look pasted flat;
 - `mark` draws a dashed frame round one repeat with a small label, as the best covers do;
 - `check` says whether a cover will do its job in a thumbnail: how much of the picture the
   wall takes, and whether the pattern still shows at that size.
@@ -76,6 +78,52 @@ def light(canvas: Image.Image, corners: Sequence[tuple[float, float]], luma: flo
     elif luma > LIGHT:
         crisp = canvas.filter(ImageFilter.UnsharpMask(radius=2.0, percent=45, threshold=3))
         canvas.paste(crisp, mask=mask)
+
+
+DAYLIGHT = (255, 236, 205)
+DAYLIGHT_STRENGTH = 0.17
+FAR_SIDE_SHADE = 0.88
+
+
+def _side(reference: Image.Image, mask: Image.Image) -> int:
+    """+1 when the left half of the wall is the brighter in `reference` (the room photo
+    before the pattern went on), -1 when the right is; +1 when they are alike."""
+    box = mask.getbbox()
+    if box is None:
+        return 1
+    mid = (box[0] + box[2]) // 2
+    gray = reference.convert("L")
+    left = ImageStat.Stat(gray.crop((box[0], box[1], mid, box[3])), mask.crop((box[0], box[1], mid, box[3]))).mean[0]
+    right = ImageStat.Stat(gray.crop((mid, box[1], box[2], box[3])), mask.crop((mid, box[1], box[2], box[3]))).mean[0]
+    return -1 if right > left + 3 else 1
+
+
+def daylight(canvas: Image.Image, corners: Sequence[tuple[float, float]], reference: Image.Image,
+             strength: float = DAYLIGHT_STRENGTH) -> int:
+    """Daylight on the wall: warm light from the brighter side of the room, a little more
+    from above, fading to the far side, which is shaded a touch. Only on the wall.
+    Returns the side the light came from (+1 left, -1 right)."""
+    mask = surface.area_mask(canvas.size, corners).filter(ImageFilter.GaussianBlur(1.2))
+    box = mask.getbbox()
+    side = _side(reference, mask)
+    if box is None:
+        return side
+    width, height = box[2] - box[0], box[3] - box[1]
+    across = Image.linear_gradient("L").transpose(Image.ROTATE_90)  # white at the right
+    if side > 0:
+        across = ImageOps.mirror(across)  # the light is on the left: white there
+    down = ImageOps.flip(Image.linear_gradient("L"))  # white at the top
+    across = across.resize((width, height), Image.BILINEAR)
+    down = down.resize((width, height), Image.BILINEAR)
+    field = Image.new("L", canvas.size, 0)
+    field.paste(ImageChops.add(across.point(lambda v: round(v * 0.72)),
+                               down.point(lambda v: round(v * 0.28))), (box[0], box[1]))
+    glow = field.point(lambda v: round(v * strength))
+    warm = ImageChops.multiply(Image.new("RGB", canvas.size, DAYLIGHT), Image.merge("RGB", (glow, glow, glow)))
+    shade = field.point(lambda v: round(255 * (FAR_SIDE_SHADE + (1 - FAR_SIDE_SHADE) * v / 255)))
+    lit = ImageChops.multiply(ImageChops.screen(canvas, warm), Image.merge("RGB", (shade, shade, shade)))
+    canvas.paste(lit, mask=mask)
+    return side
 
 
 def _font(size: int) -> ImageFont.ImageFont:

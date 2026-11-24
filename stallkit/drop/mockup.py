@@ -559,8 +559,10 @@ def compose(
         corners = used.corners(*mockup.size)
         wall_w, wall_h = surface.quad_size(corners)
         aspect = wall_w / max(wall_h, 1.0)
+        room = mockup.copy()  # the photo's own light, before the pattern covers it
         place(mockup, wall.tiled(design, used.tile, aspect), area, kind=kind)
         wall.light(mockup, corners, wall.luminance(design))
+        wall.daylight(mockup, corners, room)
         wall.mark(mockup, corners, used.tile, design.size, aspect)
     else:
         place(mockup, design, area, kind=kind)
